@@ -109,6 +109,17 @@ describe('meshes', () => {
     expect(Math.min(...xs)).toBeCloseTo(0, 4);
   });
 
+  it('keeps color cells uniform and meshes closed', () => {
+    const r = run(randomImage(10, 7), 10, 7, params({ dither: true, colorCellPx: 3 }), 1);
+    const stack = (x: number, y: number) => [...r.counts.slice((y * r.cols + x) * 3, (y * r.cols + x) * 3 + 3)];
+    for (let y = 1; y < 8; y++)
+      for (let x = 1; x < 11; x++) {
+        const cx = 1 + Math.floor((x - 1) / 3) * 3, cy = 1 + Math.floor((y - 1) / 3) * 3;
+        expect(stack(x, y)).toEqual(stack(cx, cy));
+      }
+    for (const m of buildPrintMeshes(r)) if (m) expectClosed(m);
+  });
+
   it('handles monochrome (no color layers)', () => {
     const p = params({ colorLayers: 0 });
     const r = run(randomImage(5, 4), 5, 4, p);

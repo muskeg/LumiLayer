@@ -11,6 +11,8 @@ export interface LithoParams {
   colorPriority: number;
   /** Diffuse color error between neighbouring pixels to hide banding. */
   dither?: boolean;
+  /** Color stacks are chosen per block of this many pixels (square). */
+  colorCellPx?: number;
   /** [0] is the base (lithophane body + filler), [1..3] are optional color filaments. */
   filaments: Filament[];
 }
@@ -181,15 +183,53 @@ export function solve(
   const frontColors = p.filaments.map((f) => hexToRgb(f.color));
   const target = [0, 0, 0];
   const tLab = [0, 0, 0];
-  // Floyd-Steinberg error rows (Oklab), padded by one pixel on each side.
-  let errCur = new Float32Array((imgCols + 2) * 3);
-  let errNext = new Float32Array((imgCols + 2) * 3);
 
-  for (let y = 0; y < rows; y++) {
-    if (p.dither && y > borderPx && y <= borderPx + imgRows) {
-      [errCur, errNext] = [errNext, errCur];
-      errNext.fill(0);
+  // Pass 1: pick one color stack per color cell (block of pixels).
+  const bs = Math.max(1, Math.round(p.colorCellPx ?? 1));
+  const bCols = Math.ceil(imgCols / bs);
+  const bRows = Math.ceil(imgRows / bs);
+  const cellCombo = new Uint16Array(bCols * bRows);
+  // Floyd-Steinberg error rows (Oklab), padded by one cell on each side.
+  let errCur = new Float32Array((bCols + 2) * 3);
+  let errNext = new Float32Array((bCols + 2) * 3);
+  for (let by = 0; by < bRows; by++) {
+    [errCur, errNext] = [errNext, errCur];
+    errNext.fill(0);
+    for (let bx = 0; bx < bCols; bx++) {
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      for (let iy = by * bs; iy < Math.min(imgRows, (by + 1) * bs); iy++)
+        for (let ix = bx * bs; ix < Math.min(imgCols, (bx + 1) * bs); ix++) {
+          const si = (iy * imgCols + ix) * 3;
+          sr += srgb[si]; sg += srgb[si + 1]; sb += srgb[si + 2];
+          n++;
+        }
+      sr /= n; sg /= n; sb /= n;
+      let combo: number;
+      if (p.dither) {
+        const yt = targetFor(sr, sg, sb, logSmin, target);
+        linearToOklab(target[0], target[1], target[2], tLab);
+        const e = (bx + 1) * 3;
+        for (let ch = 0; ch < 3; ch++) tLab[ch] += errCur[e + ch];
+        combo = bestCombo(solver, Math.cbrt(yt), tLab);
+        const f = labScale(solver, combo, Math.cbrt(yt));
+        for (let ch = 0; ch < 3; ch++) {
+          // Clamp so unreachable (out-of-gamut) colors don't smear error across the image.
+          const d = Math.max(-0.06, Math.min(0.06, tLab[ch] - f * labs[combo * 3 + ch]));
+          errCur[e + 3 + ch] += (d * 7) / 16;
+          errNext[e - 3 + ch] += (d * 3) / 16;
+          errNext[e + ch] += (d * 5) / 16;
+          errNext[e + 3 + ch] += d / 16;
+        }
+      } else {
+        const q = (v: number) => Math.min(BINS - 1, Math.max(0, Math.round(v * (BINS - 1))));
+        combo = lut[(q(sb) * BINS + q(sg)) * BINS + q(sr)];
+      }
+      cellCombo[by * bCols + bx] = combo;
     }
+  }
+
+  // Pass 2: per-pixel body thickness compensates the cell's color stack at full resolution.
+  for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const i = y * cols + x;
       const ix = x - borderPx;
@@ -200,26 +240,8 @@ export function solve(
         t = frameBody;
       } else {
         const si = (iy * imgCols + ix) * 3;
-        const sr = srgb[si], sg = srgb[si + 1], sb = srgb[si + 2];
-        const yt = targetFor(sr, sg, sb, logSmin, target);
-        if (p.dither) {
-          linearToOklab(target[0], target[1], target[2], tLab);
-          const e = (ix + 1) * 3;
-          for (let ch = 0; ch < 3; ch++) tLab[ch] += errCur[e + ch];
-          combo = bestCombo(solver, Math.cbrt(yt), tLab);
-          const f = labScale(solver, combo, Math.cbrt(yt));
-          for (let ch = 0; ch < 3; ch++) {
-            // Clamp so unreachable (out-of-gamut) colors don't smear error across the image.
-            const d = Math.max(-0.06, Math.min(0.06, tLab[ch] - f * labs[combo * 3 + ch]));
-            errCur[e + 3 + ch] += (d * 7) / 16;
-            errNext[e - 3 + ch] += (d * 3) / 16;
-            errNext[e + ch] += (d * 5) / 16;
-            errNext[e + 3 + ch] += d / 16;
-          }
-        } else {
-          const q = (v: number) => Math.min(BINS - 1, Math.max(0, Math.round(v * (BINS - 1))));
-          combo = lut[(q(sb) * BINS + q(sg)) * BINS + q(sr)];
-        }
+        const yt = targetFor(srgb[si], srgb[si + 1], srgb[si + 2], logSmin, target);
+        combo = cellCombo[((iy / bs) | 0) * bCols + ((ix / bs) | 0)];
         const s = Math.min(1, Math.max(smin, yt / Math.max(lumas[combo], 1e-6)));
         t = Math.min(tmax, tmin - Math.log(s) / a0Y);
       }

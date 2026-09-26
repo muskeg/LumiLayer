@@ -19,8 +19,10 @@ and **3D** shows the geometry.
 
 - **Framing**: width, aspect, rotate, mirror, zoom/pan (drag and scroll on the preview), frame width and thickness.
 - **Image**: brightness, contrast, gamma, saturation.
-- **Depth & resolution**: min/max body thickness, pixel size.
-- **Color mixing**: number of color layers, layer height, color vs. tone priority, dithering, filament presets, and each
+- **Depth & resolution**: min/max body thickness, pixel size, simplify tolerance (how much relief error is allowed when
+  merging flat areas).
+- **Color mixing**: number of color layers, layer height, color vs. tone priority, color cell size (size of each color dot,
+  roughly the nozzle width), dithering, filament presets, and each
   filament's color and *transmission distance* (TD: the thickness in mm at which about 10% of light gets through).
 
 ## Printing

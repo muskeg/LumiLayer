@@ -21,11 +21,13 @@ interface Settings {
   gamma: number;
   saturation: number;
   pixelMm: number;
+  meshTolerance: number;
   minThickness: number;
   maxThickness: number;
   colorLayers: number;
   layerHeight: number;
   colorPriority: number;
+  colorCellMm: number;
   dither: boolean;
   lightColor: string;
   exposure: number;
@@ -51,12 +53,14 @@ const DEFAULTS: Settings = {
   contrast: 0,
   gamma: 1,
   saturation: 1.15,
-  pixelMm: 0.3,
+  pixelMm: 0.2,
+  meshTolerance: 0.03,
   minThickness: 0.6,
   maxThickness: 3,
   colorLayers: 5,
   layerHeight: 0.1,
   colorPriority: 1,
+  colorCellMm: 0.4,
   dither: true,
   lightColor: '#fff4e2',
   exposure: 1,
@@ -142,7 +146,8 @@ const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
     controls: [
       { type: 'number', key: 'minThickness', label: 'Min body', min: 0.2, max: 5, step: 0.05, unit: 'mm', hint: 'Body thickness for highlights' },
       { type: 'number', key: 'maxThickness', label: 'Max body', min: 0.6, max: 10, step: 0.1, unit: 'mm', hint: 'Body thickness for shadows' },
-      { type: 'range', key: 'pixelMm', label: 'Pixel size', min: 0.1, max: 1, step: 0.05, unit: 'mm', hint: 'Smaller = finer but heavier file' },
+      { type: 'range', key: 'pixelMm', label: 'Pixel size', min: 0.1, max: 1, step: 0.05, unit: 'mm', hint: 'Relief resolution. Smaller = finer but heavier file' },
+      { type: 'range', key: 'meshTolerance', label: 'Simplify', min: 0, max: 0.1, step: 0.005, unit: 'mm', hint: 'Max relief error allowed when merging flat areas. Higher = smaller file' },
     ],
   },
   {
@@ -152,6 +157,7 @@ const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
       { type: 'range', key: 'colorLayers', label: 'Color layers', min: 0, max: 10, step: 1, hint: 'Layers of the front color slab' },
       { type: 'number', key: 'layerHeight', label: 'Layer height', min: 0.04, max: 0.3, step: 0.02, unit: 'mm' },
       { type: 'range', key: 'colorPriority', label: 'Color priority', min: 0, max: 4, step: 0.05, hint: 'Hue accuracy vs. tone accuracy' },
+      { type: 'range', key: 'colorCellMm', label: 'Color cell', min: 0.1, max: 1.2, step: 0.05, unit: 'mm', hint: 'Size of each color dot (rounded to whole pixels). About the nozzle width; smaller = much heavier file' },
       { type: 'checkbox', key: 'dither', label: 'Dithering', hint: 'Mix neighbouring color stacks to smooth gradients' },
     ],
   },
@@ -342,6 +348,8 @@ function schedule() {
 
 const MAX_PIXELS = 1_500_000;
 
+const colorCellPx = (pixelMm: number) => Math.max(1, Math.round(settings.colorCellMm / pixelMm));
+
 function lithoParams(pixelMm: number): LithoParams {
   return {
     pixelMm,
@@ -352,6 +360,7 @@ function lithoParams(pixelMm: number): LithoParams {
     layerHeight: settings.layerHeight,
     colorPriority: settings.colorPriority,
     dither: settings.dither,
+    colorCellPx: colorCellPx(pixelMm),
     filaments,
   };
 }
@@ -424,7 +433,7 @@ function updateInfo(px: number) {
   $('#info').innerHTML =
     `<b>${w} × ${h} × ${(slab + maxBody).toFixed(2)} mm</b> · ${result.cols}×${result.rows} px @ ${px.toFixed(2)} mm` +
     ` · ${used} filament${used > 1 ? 's' : ''}` +
-    (slab > 0 ? ` · color slab ${settings.colorLayers} × ${lh} mm` : '') +
+    (slab > 0 ? ` · color slab ${settings.colorLayers} × ${lh} mm, cells ${(colorCellPx(px) * px).toFixed(2)} mm` : '') +
     `<br><span class="hint">Print face-down (the viewing side is on the bed). Use ${lh} mm for both first layer and layer height, 100% infill.</span>`;
 }
 
@@ -529,7 +538,7 @@ function setupExport() {
       setStatus('Building meshes…');
       await tick();
       const r = result;
-      const meshes = buildPrintMeshes(r);
+      const meshes = buildPrintMeshes(r, settings.meshTolerance);
       const parts: Part[] = meshes.flatMap((mesh, i) =>
         mesh
           ? [{ name: `${i === 0 ? 'Base' : `Color ${i}`} - ${r.filaments[i].name}`, color: r.filaments[i].color, extruder: i + 1, mesh }]
@@ -545,7 +554,7 @@ function setupExport() {
       a.download = `${sourceName}-lithophane.3mf`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      setStatus(`Exported ${parts.length} parts · ${(data.length / 1e6).toFixed(1)} MB`);
+      setStatus(`Exported ${parts.length} parts · ${(tris / 1e6).toFixed(2)} M triangles · ${(data.length / 1e6).toFixed(1)} MB`);
     } catch (e) {
       console.error(e);
       setStatus(`Export failed: ${(e as Error).message}`);

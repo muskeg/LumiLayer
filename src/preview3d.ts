@@ -53,12 +53,11 @@ export class Preview3D {
     const slab = colorSlabThickness(r);
 
     const b = new MeshBuilder();
-    // The textured face replaces the body's bottom; keeping both causes z-fighting.
+    // No bottom: the textured face covers it (drawing both causes z-fighting).
     addBody(b, r, {
       zBottom: 0,
       zTop: slab,
       step: Math.max(1, Math.ceil(Math.max(r.cols, r.rows) / MAX_GRID)),
-      emitBottom: () => false,
     });
     const m = b.finish();
     const geo = new THREE.BufferGeometry();
