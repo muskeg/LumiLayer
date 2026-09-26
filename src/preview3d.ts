@@ -16,6 +16,8 @@ export class Preview3D {
   private simTex: THREE.CanvasTexture | null = null;
   private frontTex: THREE.CanvasTexture | null = null;
   private backlit = true;
+  private frontLit = false;
+  private key: THREE.DirectionalLight;
   private framedSize = '';
 
   constructor(private container: HTMLElement) {
@@ -27,6 +29,7 @@ export class Preview3D {
     this.scene.add(new THREE.HemisphereLight('#ffffff', '#303040', 1.2));
     const key = new THREE.DirectionalLight('#ffffff', 1.6);
     key.position.set(-1, 1.5, -2);
+    this.key = key;
     this.scene.add(key);
     const back = new THREE.DirectionalLight('#ffffff', 0.8);
     back.position.set(1, 1, 2);
@@ -50,7 +53,8 @@ export class Preview3D {
     }
     const w = r.cols * r.pixelMm;
     const h = r.rows * r.pixelMm;
-    const slab = colorSlabThickness(r);
+    const frontLit = r.mode !== 'litho';
+    const slab = frontLit ? 0 : colorSlabThickness(r);
 
     const b = new MeshBuilder();
     // No bottom: the textured face covers it (drawing both causes z-fighting).
@@ -59,19 +63,31 @@ export class Preview3D {
       zTop: slab,
       step: Math.max(1, Math.ceil(Math.max(r.cols, r.rows) / MAX_GRID)),
     });
-    const m = b.finish();
+    // Front-lit prints are viewed from the top, so mirror X (and flip winding to keep normals outward).
+    const m = b.finish(frontLit);
     const geo = new THREE.BufferGeometry();
+    if (frontLit) {
+      const uv = new Float32Array((m.positions.length / 3) * 2);
+      for (let i = 0, j = 0; i < m.positions.length; i += 3, j += 2) {
+        m.positions[i] = w - m.positions[i];
+        uv[j] = m.positions[i] / w;
+        uv[j + 1] = m.positions[i + 1] / h;
+      }
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    }
     geo.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
     geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
     geo.computeVertexNormals();
-    this.bodyMat.color.set(r.filaments[0].color);
+    this.bodyMat.color.set(frontLit ? '#ffffff' : r.filaments[0].color);
     this.group.add(new THREE.Mesh(geo, this.bodyMat));
 
-    // Textured viewing face; the plane is rotated to face -Z (the bed side).
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.faceMat);
-    plane.rotation.y = Math.PI;
-    plane.position.set(w / 2, h / 2, 0);
-    this.group.add(plane);
+    if (!frontLit) {
+      // Textured viewing face; the plane is rotated to face -Z (the bed side).
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.faceMat);
+      plane.rotation.y = Math.PI;
+      plane.position.set(w / 2, h / 2, 0);
+      this.group.add(plane);
+    }
 
     this.simTex?.dispose();
     this.frontTex?.dispose();
@@ -81,15 +97,19 @@ export class Preview3D {
       t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = 4;
     }
+    this.frontLit = frontLit;
+    this.key.position.set(-1, 1.5, frontLit ? 2 : -2);
     this.applyFaceTexture();
 
-    const size = `${w.toFixed(1)}x${h.toFixed(1)}`;
+    const size = `${r.mode}:${w.toFixed(1)}x${h.toFixed(1)}`;
     if (size !== this.framedSize) {
       this.framedSize = size;
-      this.controls.target.set(w / 2, h / 2, 1);
+      this.controls.target.set(w / 2, h / 2, frontLit ? 0 : 1);
       const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
       const dist = 1.2 * Math.max(h / 2 / tan, w / 2 / (tan * this.camera.aspect));
-      this.camera.position.set(w / 2, h / 2, -dist);
+      // Front-lit: look down at the top with a slight tilt; litho: look at the bed face (-Z).
+      if (frontLit) this.camera.position.set(w / 2, h / 2 - dist * 0.35, dist * 0.95);
+      else this.camera.position.set(w / 2, h / 2, -dist);
       this.camera.near = dist / 50;
       this.camera.far = dist * 20;
       this.camera.updateProjectionMatrix();
@@ -102,15 +122,19 @@ export class Preview3D {
   }
 
   private applyFaceTexture() {
-    this.faceMat.map = this.backlit ? this.simTex : this.frontTex;
+    const tex = this.backlit ? this.simTex : this.frontTex;
+    this.faceMat.map = tex;
     this.faceMat.needsUpdate = true;
-    this.scene.background = new THREE.Color(this.backlit ? '#0b0c0f' : '#20232a');
+    this.bodyMat.map = this.frontLit ? tex : null;
+    this.bodyMat.needsUpdate = true;
+    this.scene.background = new THREE.Color(this.backlit && !this.frontLit ? '#0b0c0f' : '#20232a');
   }
 
   resize() {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
-    this.renderer.setSize(w, h);
+    // updateStyle=false: CSS sizes the canvas, so resizing the buffer doesn't re-trigger the ResizeObserver.
+    this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.render();

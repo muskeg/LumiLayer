@@ -44,8 +44,15 @@ export class MeshBuilder {
     return this.ni / 3;
   }
 
-  finish(): Mesh {
-    return { positions: this.pos.slice(0, this.nv * 3), indices: this.idx.slice(0, this.ni) };
+  finish(flip = false): Mesh {
+    const indices = this.idx.slice(0, this.ni);
+    if (flip)
+      for (let i = 0; i < indices.length; i += 3) {
+        const t = indices[i + 1];
+        indices[i + 1] = indices[i + 2];
+        indices[i + 2] = t;
+      }
+    return { positions: this.pos.slice(0, this.nv * 3), indices };
   }
 }
 
@@ -55,19 +62,33 @@ export class MeshBuilder {
  * so the image reads correctly when looking at the z=0 (bed) face.
  */
 
-/** Material of each voxel in the color slab: 0 = base filler, 1..3 = color filament. */
-export function slabMaterials(r: LithoResult): Uint8Array {
-  const n = r.colorLayers;
+const AIR = 255;
+
+/**
+ * Material of each voxel (0 = base, 1..3 = color filament, AIR = empty), K layers per column.
+ * Litho: color slab only (the body above is meshed separately). Front-lit: whole print, colors on top.
+ */
+export function voxelColumns(r: LithoResult): { mat: Uint8Array; K: number } {
   const total = r.cols * r.rows;
-  const mat = new Uint8Array(total * n);
+  const litho = r.mode === 'litho';
+  const heights = new Int32Array(total);
+  let K = r.colorLayers;
+  if (!litho) {
+    K = 0;
+    for (let p = 0; p < total; p++) K = Math.max(K, (heights[p] = Math.round(r.body[p] / r.layerHeight)));
+  }
+  const mat = new Uint8Array(total * K);
   for (let p = 0; p < total; p++) {
-    let k = 0;
+    const h = litho ? K : heights[p];
+    const used = r.counts[p * 3] + r.counts[p * 3 + 1] + r.counts[p * 3 + 2];
+    let k = litho ? 0 : Math.max(0, h - used);
     for (let f = 0; f < 3; f++) {
       const c = r.counts[p * 3 + f];
-      for (let q = 0; q < c && k < n; q++) mat[p * n + k++] = f + 1;
+      for (let q = 0; q < c && k < h; q++) mat[p * K + k++] = f + 1;
     }
+    if (!litho) mat.fill(AIR, p * K + h, (p + 1) * K);
   }
-  return mat;
+  return { mat, K };
 }
 
 interface BodyOptions {
@@ -234,14 +255,20 @@ const PLANE_AXES = [
  */
 export function buildPrintMeshes(r: LithoResult, tolerance = 0.02): (Mesh | null)[] {
   const { cols: W, rows: H, colorLayers: N, pixelMm: px, layerHeight: lh } = r;
-  const dims = [W, H, N];
-  const mat = slabMaterials(r);
-  // Above the slab (k >= N) is the base body; outside the grid is empty (-1).
+  const litho = r.mode === 'litho';
+  const { mat, K: NK } = voxelColumns(r);
+  const dims = [W, H, NK];
+  // Litho: above the slab is the base body. Front-lit: air. Outside the grid is empty (-1).
+  const above = litho ? 0 : -1;
   const at = (i: number, j: number, k: number) => {
     if (i < 0 || j < 0 || k < 0 || i >= W || j >= H) return -1;
-    return k >= N ? 0 : mat[(j * W + i) * N + k];
+    if (k >= NK) return above;
+    const v = mat[(j * W + i) * NK + k];
+    return v === AIR ? -1 : v;
   };
-  const latticeSize = (W + 1) * (H + 1) * (N + 1);
+  // Litho is viewed from the bed side (rotated 180° about Z); front-lit is viewed from the top (mirrored, so winding flips).
+  const X = litho ? (I: number) => (W - I) * px : (I: number) => I * px;
+  const latticeSize = (W + 1) * (H + 1) * (NK + 1);
   const vmap = new Int32Array(latticeSize);
   const marks = new Uint8Array(latticeSize);
   const key = (I: number, J: number, K: number) => (K * (H + 1) + J) * (W + 1) + I;
@@ -266,7 +293,7 @@ export function buildPrintMeshes(r: LithoResult, tolerance = 0.02): (Mesh | null
       const kk = key(I, J, K);
       let v = vmap[kk];
       if (v < 0) {
-        v = b.addVertex((W - I) * px, (H - J) * px, K * lh);
+        v = b.addVertex(X(I), (H - J) * px, K * lh);
         vmap[kk] = v;
       }
       return v;
@@ -320,38 +347,90 @@ export function buildPrintMeshes(r: LithoResult, tolerance = 0.02): (Mesh | null
           marks[key(c[0], c[1], c[2])] = 1;
         }
     }
-    if (m === 0) {
+    if (m === 0 && litho) {
       // Body side walls end on every perimeter lattice point at the top of the slab.
       for (let I = 0; I <= W; I++) marks[key(I, 0, N)] = marks[key(I, H, N)] = 1;
       for (let J = 0; J <= H; J++) marks[key(0, J, N)] = marks[key(W, J, N)] = 1;
     }
 
+    // Pinch edges: two diagonal cells of this material touch only along a unit edge, which
+    // would give it four faces. Each cell gets its own midpoint vertex on that edge instead.
+    const pinch = new Set<number>();
+    const mids = new Map<number, number>();
+    const P = [0, 0, 0];
+    for (let ax = 0; ax < 3; ax++) {
+      const [pa, pb] = PLANE_AXES[ax];
+      for (P[ax] = 0; P[ax] < dims[ax]; P[ax]++)
+        for (P[pa] = 1; P[pa] < dims[pa]; P[pa]++)
+          for (P[pb] = 1; P[pb] < dims[pb]; P[pb]++) {
+            const q = (da: number, db: number) => {
+              c[ax] = P[ax];
+              c[pa] = P[pa] - 1 + da;
+              c[pb] = P[pb] - 1 + db;
+              return at(c[0], c[1], c[2]) === m;
+            };
+            const s00 = q(0, 0), s11 = q(1, 1), s01 = q(0, 1), s10 = q(1, 0);
+            if ((s00 && s11 && !s01 && !s10) || (s01 && s10 && !s00 && !s11)) {
+              const k0 = key(P[0], P[1], P[2]);
+              pinch.add(k0 * 3 + ax);
+              marks[k0] = 1;
+              P[ax]++;
+              marks[key(P[0], P[1], P[2])] = 1;
+              P[ax]--;
+            }
+          }
+    }
+    const oc = [0, 0, 0];
+    const midpoint = (edgeAx: number, E: number[]) => {
+      const [pa, pb] = PLANE_AXES[edgeAx];
+      const quadrant = (oc[pa] < E[pa] ? 0 : 1) + (oc[pb] < E[pb] ? 0 : 2);
+      const id = ((key(E[0], E[1], E[2]) * 3 + edgeAx) * 4) + quadrant;
+      let v = mids.get(id);
+      if (v === undefined) {
+        const x = E[0] + (edgeAx === 0 ? 0.5 : 0), y = E[1] + (edgeAx === 1 ? 0.5 : 0), z = E[2] + (edgeAx === 2 ? 0.5 : 0);
+        v = b.addVertex(X(x), (H - y) * px, z * lh);
+        mids.set(id, v);
+      }
+      return v;
+    };
+
     // Pass 2: emit each rectangle as a polygon that includes all marked points on its edges.
     const poly: number[] = [];
-    const visit = (ax: number, p: number, u: number, v: number) => {
+    const E = [0, 0, 0];
+    // Visit lattice point (u, v), then the unit step towards (u + du, v + dv) whose face cell is (cu, cv).
+    const step = (ax: number, p: number, owner: number, u: number, v: number, du: number, dv: number, cu: number, cv: number) => {
       lattice(ax, p, u, v);
       if (marks[key(c[0], c[1], c[2])]) poly.push(vid(c[0], c[1], c[2]));
+      if (pinch.size === 0) return;
+      const edgeAx = PLANE_AXES[ax][du !== 0 ? 0 : 1];
+      lattice(ax, p, Math.min(u, u + du), Math.min(v, v + dv));
+      E[0] = c[0]; E[1] = c[1]; E[2] = c[2];
+      if (!pinch.has(key(E[0], E[1], E[2]) * 3 + edgeAx)) return;
+      lattice(ax, owner, cu, cv);
+      oc[0] = c[0]; oc[1] = c[1]; oc[2] = c[2];
+      poly.push(midpoint(edgeAx, E));
     };
     for (let i = 0; i < rects.length; i += 7) {
       const ax = rects[i], sign = rects[i + 1], p = rects[i + 2];
       const u0 = rects[i + 3], v0 = rects[i + 4], u1 = rects[i + 5], v1 = rects[i + 6];
+      const owner = sign < 0 ? p : p - 1;
       poly.length = 0;
-      for (let u = u0; u < u1; u++) visit(ax, p, u, v0);
-      for (let v = v0; v < v1; v++) visit(ax, p, u1, v);
-      for (let u = u1; u > u0; u--) visit(ax, p, u, v1);
-      for (let v = v1; v > v0; v--) visit(ax, p, u0, v);
+      for (let u = u0; u < u1; u++) step(ax, p, owner, u, v0, 1, 0, u, v0);
+      for (let v = v0; v < v1; v++) step(ax, p, owner, u1, v, 0, 1, u1 - 1, v);
+      for (let u = u1; u > u0; u--) step(ax, p, owner, u, v1, -1, 0, u - 1, v1 - 1);
+      for (let v = v1; v > v0; v--) step(ax, p, owner, u0, v, 0, -1, u0, v - 1);
       if (sign < 0) poly.reverse();
       if (poly.length === 4) {
         b.addQuad(poly[0], poly[1], poly[2], poly[3]);
       } else {
         lattice(ax, p, (u0 + u1) / 2, (v0 + v1) / 2);
-        const center = b.addVertex((W - c[0]) * px, (H - c[1]) * px, c[2] * lh);
+        const center = b.addVertex(X(c[0]), (H - c[1]) * px, c[2] * lh);
         for (let k = 0; k < poly.length; k++) b.addTri(center, poly[k], poly[(k + 1) % poly.length]);
       }
     }
 
-    if (m === 0) addBody(b, r, { zBottom: N * lh, zTop: N * lh, step: 1, tolerance, bottomVertex: (I, J) => vid(I, J, N) });
-    out.push(b.triangleCount > 0 ? b.finish() : null);
+    if (m === 0 && litho) addBody(b, r, { zBottom: N * lh, zTop: N * lh, step: 1, tolerance, bottomVertex: (I, J) => vid(I, J, N) });
+    out.push(b.triangleCount > 0 ? b.finish(!litho) : null);
   }
   return out;
 }

@@ -1,12 +1,15 @@
 import './style.css';
 import type { Filament } from './color';
 import { adjust, demoImage, loadImage, panRange, renderFramed, sourceAspect, type Source } from './imaging';
-import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Solver } from './lithophane';
+import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Mode, type Solver } from './lithophane';
 import { buildPrintMeshes } from './mesh';
+import { suggestPalette } from './palette';
 import type { Preview3D } from './preview3d';
 import { write3mf, type Part } from './threemf';
 
 interface Settings {
+  mode: Mode;
+  baseLayers: number;
   widthMm: number;
   aspect: string;
   rotation: number;
@@ -34,12 +37,18 @@ interface Settings {
 }
 
 type Key = keyof Settings;
-type Ctl =
+type Ctl = (
   | { type: 'range' | 'number'; key: Key; label: string; min: number; max: number; step: number; unit?: string; hint?: string }
   | { type: 'select'; key: Key; label: string; options: [string, string][]; numeric?: boolean; hint?: string }
-  | { type: 'checkbox' | 'color'; key: Key; label: string; hint?: string };
+  | { type: 'checkbox' | 'color'; key: Key; label: string; hint?: string }
+) & { modes?: Mode[] };
+
+const FRONT_LIT: Mode[] = ['relief', 'flat'];
+const isFrontLit = (m: Mode) => m !== 'litho';
 
 const DEFAULTS: Settings = {
+  mode: 'litho',
+  baseLayers: 6,
   widthMm: 100,
   aspect: 'original',
   rotation: 0,
@@ -66,7 +75,13 @@ const DEFAULTS: Settings = {
   exposure: 1,
 };
 
-const PRESETS: Record<string, Filament[]> = {
+/** Settings applied when switching between the backlit and front-lit families. */
+const FAMILY_DEFAULTS: Record<'litho' | 'front', Partial<Settings>> = {
+  litho: { layerHeight: 0.1, colorLayers: 5, frameThickness: 4, lightColor: '#fff4e2' },
+  front: { layerHeight: 0.08, colorLayers: 12, frameThickness: 1.2, baseLayers: 6, lightColor: '#ffffff' },
+};
+
+const LITHO_PRESETS: Record<string, Filament[]> = {
   'CMY + White': [
     { name: 'White', color: '#ffffff', td: 1.8, enabled: true },
     { name: 'Cyan', color: '#00a0e0', td: 2.5, enabled: true },
@@ -93,7 +108,54 @@ const PRESETS: Record<string, Filament[]> = {
   ],
 };
 
+// Front-lit: slot 1 is the opaque base plate, slots 2-4 stack upward in order, so put dark / covering colours last.
+const FRONT_PRESETS: Record<string, Filament[]> = {
+  'CMY on White': [
+    { name: 'White', color: '#f4f1e8', td: 3, enabled: true },
+    { name: 'Cyan', color: '#00a0e0', td: 1.5, enabled: true },
+    { name: 'Magenta', color: '#e0007a', td: 1.5, enabled: true },
+    { name: 'Yellow', color: '#ffe000', td: 2, enabled: true },
+  ],
+  'Warm (Ivory + Yellow + Red + Charcoal)': [
+    { name: 'Ivory', color: '#f1ead8', td: 3, enabled: true },
+    { name: 'Yellow', color: '#f5c400', td: 2, enabled: true },
+    { name: 'Red', color: '#c8102e', td: 1.2, enabled: true },
+    { name: 'Charcoal', color: '#2b2b2b', td: 0.6, enabled: true },
+  ],
+  'Light on dark (Black + Red + Yellow + White)': [
+    { name: 'Black', color: '#141414', td: 0.5, enabled: true },
+    { name: 'Red', color: '#c8102e', td: 1.2, enabled: true },
+    { name: 'Yellow', color: '#f5c400', td: 2, enabled: true },
+    { name: 'White', color: '#f4f1e8', td: 2.5, enabled: true },
+  ],
+  'Grayscale (Black + White)': [
+    { name: 'Black', color: '#141414', td: 0.5, enabled: true },
+    { name: 'Red', color: '#c8102e', td: 1.2, enabled: false },
+    { name: 'Yellow', color: '#f5c400', td: 2, enabled: false },
+    { name: 'White', color: '#f4f1e8', td: 2.5, enabled: true },
+  ],
+};
+
+const presetsFor = (m: Mode) => (isFrontLit(m) ? FRONT_PRESETS : LITHO_PRESETS);
+
 const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
+  {
+    title: 'Mode',
+    open: true,
+    controls: [
+      {
+        type: 'select',
+        key: 'mode',
+        label: 'Type',
+        options: [
+          ['litho', 'Lithophane (backlit)'],
+          ['relief', 'Color relief (front-lit)'],
+          ['flat', 'Flat color (front-lit)'],
+        ],
+        hint: 'Backlit lithophane, or a front-lit color picture viewed under room light',
+      },
+    ],
+  },
   {
     title: 'Framing',
     open: true,
@@ -144,17 +206,18 @@ const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
     title: 'Depth & resolution',
     open: true,
     controls: [
-      { type: 'number', key: 'minThickness', label: 'Min body', min: 0.2, max: 5, step: 0.05, unit: 'mm', hint: 'Body thickness for highlights' },
-      { type: 'number', key: 'maxThickness', label: 'Max body', min: 0.6, max: 10, step: 0.1, unit: 'mm', hint: 'Body thickness for shadows' },
+      { type: 'number', key: 'minThickness', label: 'Min body', min: 0.2, max: 5, step: 0.05, unit: 'mm', hint: 'Body thickness for highlights', modes: ['litho'] },
+      { type: 'number', key: 'maxThickness', label: 'Max body', min: 0.6, max: 10, step: 0.1, unit: 'mm', hint: 'Body thickness for shadows', modes: ['litho'] },
+      { type: 'range', key: 'baseLayers', label: 'Base plate', min: 2, max: 25, step: 1, hint: 'Opaque base plate thickness, in layers', modes: FRONT_LIT },
       { type: 'range', key: 'pixelMm', label: 'Pixel size', min: 0.1, max: 1, step: 0.05, unit: 'mm', hint: 'Relief resolution. Smaller = finer but heavier file' },
-      { type: 'range', key: 'meshTolerance', label: 'Simplify', min: 0, max: 0.1, step: 0.005, unit: 'mm', hint: 'Max relief error allowed when merging flat areas. Higher = smaller file' },
+      { type: 'range', key: 'meshTolerance', label: 'Simplify', min: 0, max: 0.1, step: 0.005, unit: 'mm', hint: 'Max relief error allowed when merging flat areas. Higher = smaller file', modes: ['litho'] },
     ],
   },
   {
     title: 'Color mixing',
     open: true,
     controls: [
-      { type: 'range', key: 'colorLayers', label: 'Color layers', min: 0, max: 10, step: 1, hint: 'Layers of the front color slab' },
+      { type: 'range', key: 'colorLayers', label: 'Color layers', min: 0, max: 12, step: 1, hint: 'Maximum layers of color stacked per pixel' },
       { type: 'number', key: 'layerHeight', label: 'Layer height', min: 0.04, max: 0.3, step: 0.02, unit: 'mm' },
       { type: 'range', key: 'colorPriority', label: 'Color priority', min: 0, max: 4, step: 0.05, hint: 'Hue accuracy vs. tone accuracy' },
       { type: 'range', key: 'colorCellMm', label: 'Color cell', min: 0.3, max: 1.2, step: 0.05, unit: 'mm', hint: 'Size of each color dot (rounded to whole pixels). Keep it at least the nozzle width: smaller dots cannot be printed and make slicers crawl' },
@@ -164,7 +227,7 @@ const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
   {
     title: 'Preview light',
     controls: [
-      { type: 'color', key: 'lightColor', label: 'Backlight' },
+      { type: 'color', key: 'lightColor', label: 'Light' },
       { type: 'range', key: 'exposure', label: 'Intensity', min: 0.3, max: 3, step: 0.01 },
     ],
   },
@@ -173,7 +236,7 @@ const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 const settings: Settings = { ...DEFAULTS };
-let filaments: Filament[] = structuredClone(PRESETS['CMY + White']);
+let filaments: Filament[] = structuredClone(LITHO_PRESETS['CMY + White']);
 let source: Source = demoImage();
 let sourceName = 'lumilayer';
 let solver: Solver | null = null;
@@ -189,6 +252,10 @@ const simCanvas = document.createElement('canvas');
 const frontCanvas = document.createElement('canvas');
 const inputs = new Map<Key, HTMLInputElement | HTMLSelectElement>();
 const outputs = new Map<Key, HTMLOutputElement>();
+const rows = new Map<Key, HTMLElement>();
+let refreshFilaments = () => {};
+let suggestButton: HTMLButtonElement | null = null;
+let lastSrgb: Float32Array | null = null;
 
 function fmt(c: Ctl, v: unknown): string {
   if (c.type !== 'range') return '';
@@ -249,8 +316,10 @@ function buildControl(c: Ctl): HTMLElement {
       v = Math.min(c.max, Math.max(c.min, n));
     } else if (c.type === 'select' && c.numeric) v = Number(input.value);
     else v = input.value;
+    const prev = record[c.key];
     record[c.key] = v;
     outputs.get(c.key)!.textContent = fmt(c, v);
+    if (c.key === 'mode') onModeChange(prev as Mode);
     schedule();
   });
   row.appendChild(input);
@@ -258,7 +327,27 @@ function buildControl(c: Ctl): HTMLElement {
   row.appendChild(out);
   inputs.set(c.key, input);
   outputs.set(c.key, out);
+  rows.set(c.key, row);
   return row;
+}
+
+function onModeChange(prev: Mode) {
+  if (isFrontLit(prev) !== isFrontLit(settings.mode)) {
+    Object.assign(settings, FAMILY_DEFAULTS[isFrontLit(settings.mode) ? 'front' : 'litho']);
+    filaments = structuredClone(Object.values(presetsFor(settings.mode))[0]);
+    refreshFilaments();
+  }
+  syncControls();
+  applyModeUi();
+}
+
+function applyModeUi() {
+  for (const c of SECTIONS.flatMap((s) => s.controls)) if (c.modes) rows.get(c.key)!.hidden = !c.modes.includes(settings.mode);
+  const front = isFrontLit(settings.mode);
+  $('button[data-view="backlit"]').textContent = front ? 'Front-lit' : 'Backlit';
+  $('button[data-view="front"]').textContent = 'Filament map';
+  $('#light-toggle').lastChild!.textContent = front ? ' Simulated colors' : ' Backlight on';
+  if (suggestButton) suggestButton.hidden = !front;
 }
 
 function syncControls() {
@@ -279,9 +368,13 @@ function buildFilaments(): HTMLElement {
   presetRow.className = 'row select';
   presetRow.innerHTML = '<span>Preset</span>';
   const preset = document.createElement('select');
-  preset.add(new Option('Custom', ''));
-  for (const name of Object.keys(PRESETS)) preset.add(new Option(name, name));
-  preset.value = 'CMY + White';
+  const fillPresets = () => {
+    preset.length = 0;
+    preset.add(new Option('Custom', ''));
+    for (const name of Object.keys(presetsFor(settings.mode))) preset.add(new Option(name, name));
+    preset.value = Object.keys(presetsFor(settings.mode))[0];
+  };
+  fillPresets();
   presetRow.appendChild(preset);
   box.appendChild(presetRow);
   const list = document.createElement('div');
@@ -297,7 +390,7 @@ function buildFilaments(): HTMLElement {
         <span class="slot" title="Slot / extruder">${i + 1}</span>
         <input type="color" title="Filament color">
         <input type="text" maxlength="24" title="Filament name">
-        <input type="number" min="0.1" max="20" step="0.1" title="Transmission distance (mm): thickness at which ~10% of light passes">`;
+        <input type="number" min="0.1" max="20" step="0.1" title="Transmission distance (mm): backlit, thickness at which ~10% of light passes; front-lit, thickness that hides what is below">`;
       const [enabled, color, name, td] = row.querySelectorAll('input');
       color.value = f.color;
       name.value = f.name;
@@ -319,14 +412,44 @@ function buildFilaments(): HTMLElement {
   };
   preset.onchange = () => {
     if (!preset.value) return;
-    filaments = structuredClone(PRESETS[preset.value]);
+    filaments = structuredClone(presetsFor(settings.mode)[preset.value]);
     render();
     schedule();
   };
   const legend = document.createElement('p');
   legend.className = 'hint';
-  legend.textContent = 'Slot 1 is the base (body). Slots 2-4 are stacked color layers. Last field: transmission distance (TD, mm).';
+  const legendText = () =>
+    isFrontLit(settings.mode)
+      ? 'Slot 1 is the opaque base plate. Slots 2-4 stack upward in that order (put covering or dark colors last). Last field: TD (mm).'
+      : 'Slot 1 is the base (body). Slots 2-4 are stacked color layers. Last field: transmission distance (TD, mm).';
+  legend.textContent = legendText();
   box.appendChild(legend);
+  const suggest = document.createElement('button');
+  suggest.className = 'small';
+  suggest.textContent = 'Suggest palette for this photo';
+  suggest.title = 'Try every base + 3-color combination from a library of common filaments and pick the best match';
+  suggest.onclick = async () => {
+    if (!lastSrgb) return;
+    suggest.disabled = true;
+    try {
+      filaments = await suggestPalette(lastSrgb, settings.layerHeight, settings.colorLayers, undefined, (f) =>
+        setStatus(`Comparing palettes… ${Math.round(f * 100)}%`),
+      );
+      preset.value = '';
+      render();
+      setStatus(`Suggested: ${filaments.map((f) => f.name).join(', ')}. Set each color and TD to match your actual rolls.`);
+      schedule();
+    } finally {
+      suggest.disabled = false;
+    }
+  };
+  suggestButton = suggest;
+  box.appendChild(suggest);
+  refreshFilaments = () => {
+    fillPresets();
+    legend.textContent = legendText();
+    render();
+  };
   render();
   return box;
 }
@@ -352,6 +475,8 @@ const colorCellPx = (pixelMm: number) => Math.max(1, Math.round(settings.colorCe
 
 function lithoParams(pixelMm: number): LithoParams {
   return {
+    mode: settings.mode,
+    baseLayers: settings.baseLayers,
     pixelMm,
     minThickness: settings.minThickness,
     maxThickness: Math.max(settings.minThickness, settings.maxThickness),
@@ -378,8 +503,9 @@ function compute() {
 
   const img = renderFramed(source, cols, rows, settings);
   const srgb = adjust(img.data, settings);
+  lastSrgb = srgb;
   const p = lithoParams(px);
-  const key = JSON.stringify([p.colorLayers, p.layerHeight, p.minThickness, p.maxThickness, p.colorPriority, p.filaments]);
+  const key = JSON.stringify([p.mode, p.colorLayers, p.layerHeight, p.minThickness, p.maxThickness, p.colorPriority, p.filaments]);
   if (!solver || key !== solverKey) {
     solver = buildSolver(p);
     solverKey = key;
@@ -423,18 +549,23 @@ function update3d() {
 
 function updateInfo(px: number) {
   if (!result) return;
-  const slab = colorSlabThickness(settings);
+  const front = isFrontLit(settings.mode);
+  const slab = front ? 0 : colorSlabThickness(settings);
   let maxBody = 0;
   for (const t of result.body) maxBody = Math.max(maxBody, t);
   const w = (result.cols * px).toFixed(1);
   const h = (result.rows * px).toFixed(1);
   const used = filaments.filter((f, i) => i === 0 || (f.enabled && settings.colorLayers > 0)).length;
   const lh = settings.layerHeight.toFixed(2);
+  const plate = (settings.baseLayers * settings.layerHeight).toFixed(2);
+  const firstLayer = (Math.min(settings.baseLayers, Math.max(1, Math.round(0.2 / settings.layerHeight))) * settings.layerHeight).toFixed(2);
   $('#info').innerHTML =
     `<b>${w} × ${h} × ${(slab + maxBody).toFixed(2)} mm</b> · ${result.cols}×${result.rows} px @ ${px.toFixed(2)} mm` +
     ` · ${used} filament${used > 1 ? 's' : ''}` +
-    (slab > 0 ? ` · color slab ${settings.colorLayers} × ${lh} mm, cells ${(colorCellPx(px) * px).toFixed(2)} mm` : '') +
-    `<br><span class="hint">Print face-down (the viewing side is on the bed). Use ${lh} mm for both first layer and layer height, 100% infill.</span>`;
+    (settings.colorLayers > 0 ? ` · ${settings.colorLayers} color layers × ${lh} mm, cells ${(colorCellPx(px) * px).toFixed(2)} mm` : '') +
+    (front
+      ? `<br><span class="hint">Print face-up as exported, 100% infill. Layer height ${lh} mm. The first layer must be a whole multiple of it (e.g. ${firstLayer} mm) and stay within the ${plate} mm base plate, or color layers get misaligned.</span>`
+      : `<br><span class="hint">Print face-down (the viewing side is on the bed). Use ${lh} mm for both first layer and layer height, 100% infill.</span>`);
 }
 
 function setStatus(s: string) {
@@ -577,6 +708,7 @@ function setupExport() {
 
 buildControls();
 syncControls();
+applyModeUi();
 setupViewer();
 setupFileInput();
 setupExport();

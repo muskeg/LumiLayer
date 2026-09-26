@@ -1,7 +1,13 @@
 import { absorption, lightness, linearToOklab, linearToSrgb, luminance, srgbToLinear, hexToRgb } from './color';
 import type { Filament, RGB } from './color';
 
+/** litho: backlit, printed face-down. relief/flat: front-lit colour stacks on a base plate, printed face-up. */
+export type Mode = 'litho' | 'relief' | 'flat';
+
 export interface LithoParams {
+  mode?: Mode;
+  /** Front-lit modes: base plate thickness in layers. */
+  baseLayers?: number;
   pixelMm: number;
   minThickness: number;
   maxThickness: number;
@@ -34,17 +40,22 @@ export interface Solver {
   a0Y: number;
   smin: number;
   fmin: number;
+  /** Front-lit: Oklab lightness range the palette can reproduce; image lightness is mapped into it. */
+  lMin?: number;
+  lMax?: number;
 }
 
 export interface LithoResult {
+  mode: Mode;
+  baseLayers: number;
   cols: number;
   rows: number;
   pixelMm: number;
   layerHeight: number;
   colorLayers: number;
-  /** Layers of filament 1..3 per pixel, stacked in that order from the front face. */
+  /** Layers of filament 1..3 per pixel, stacked in that order (from the front face, or up from the base plate). */
   counts: Uint8Array;
-  /** Body thickness (mm) behind the color slab. */
+  /** Litho: body thickness (mm) behind the color slab. Front-lit: total column height (mm). */
   body: Float32Array;
   sim: Uint8ClampedArray;
   front: Uint8ClampedArray;
@@ -90,6 +101,7 @@ function targetFor(sr: number, sg: number, sb: number, logSmin: number, out: num
 }
 
 export function buildSolver(p: LithoParams): Solver {
+  if (p.mode === 'relief' || p.mode === 'flat') return buildFrontLitSolver(p);
   const n = Math.max(0, Math.round(p.colorLayers));
   const lh = p.layerHeight;
   const a0 = absorption(p.filaments[0]);
@@ -133,6 +145,84 @@ export function buildSolver(p: LithoParams): Solver {
 
 /** Oklab scale factor of a combo once the body thickness matches target luminance. */
 const labScale = (s: Solver, c: number, cbrtYt: number) => Math.min(1, Math.max(s.fmin, cbrtYt * s.invCbrtLumas[c]));
+
+/**
+ * Reflectance of a front-lit column: opaque base plate, then each filament's run of layers on top.
+ * A run covers what's below linearly with thickness until fully opaque at its TD (the HueForge convention),
+ * blended in linear light.
+ */
+export function frontLitReflectance(p: LithoParams, counts: ArrayLike<number>, out: number[]) {
+  const lin = (f: Filament) => hexToRgb(f.color).map(srgbToLinear);
+  const plate = lin(p.filaments[0]);
+  out[0] = plate[0]; out[1] = plate[1]; out[2] = plate[2];
+  for (let k = 0; k < 3; k++) {
+    const f = p.filaments[k + 1];
+    if (!f || counts[k] === 0) continue;
+    const alpha = Math.min(1, (counts[k] * p.layerHeight) / Math.max(0.05, f.td));
+    const c = lin(f);
+    for (let ch = 0; ch < 3; ch++) out[ch] = alpha * c[ch] + (1 - alpha) * out[ch];
+  }
+}
+
+function buildFrontLitSolver(p: LithoParams): Solver {
+  const n = Math.max(0, Math.round(p.colorLayers));
+  const active = [0, 1, 2].filter((k) => p.filaments[k + 1]?.enabled);
+  const combos = enumerateCombos(active, n);
+  const count = combos.length / 3;
+  const refl = new Float32Array(count * 3);
+  const rgb = [0, 0, 0];
+  for (let c = 0; c < count; c++) {
+    frontLitReflectance(p, combos.subarray(c * 3, c * 3 + 3), rgb);
+    refl.set(rgb, c * 3);
+  }
+  // Absolute reflectance: a print whose lightest stack is grey should look grey, not white.
+  const trans = refl;
+  const lumas = new Float32Array(count);
+  const labs = new Float32Array(count * 3);
+  for (let c = 0; c < count; c++) {
+    lumas[c] = luminance(trans[c * 3], trans[c * 3 + 1], trans[c * 3 + 2]);
+    linearToOklab(trans[c * 3], trans[c * 3 + 1], trans[c * 3 + 2], labs, c * 3);
+  }
+  const lut = new Uint16Array(0);
+  let lMin = 1, lMax = 0;
+  for (let c = 0; c < count; c++) {
+    lMin = Math.min(lMin, labs[c * 3]);
+    lMax = Math.max(lMax, labs[c * 3]);
+  }
+  // fmin = 1 disables luminance compensation: tone comes from the stack itself.
+  return {
+    combos, trans, lumas, invCbrtLumas: new Float32Array(count), labs, wC: Math.max(0, p.colorPriority), lut,
+    a0: [0, 0, 0], a0Y: 1, smin: 1, fmin: 1, lMin, lMax,
+  };
+}
+
+/** Oklab target with the image's lightness range [lo, hi] mapped onto the palette's range. */
+function frontLitTarget(s: Solver, sr: number, sg: number, sb: number, lo: number, hi: number, out: number[]) {
+  linearToOklab(srgbToLinear(sr), srgbToLinear(sg), srgbToLinear(sb), out);
+  const lMin = s.lMin ?? 0, lMax = s.lMax ?? 1;
+  const t = Math.min(1, Math.max(0, (out[0] - lo) / Math.max(1e-3, hi - lo)));
+  out[0] = lMin + (lMax - lMin) * t;
+}
+
+/** Oklab lightness at the given low/high percentiles of an sRGB float image. */
+export function lightnessRange(srgb: Float32Array, loPct = 0.01, hiPct = 0.99): [number, number] {
+  const hist = new Uint32Array(256);
+  const lab = [0, 0, 0];
+  const n = srgb.length / 3;
+  const stride = Math.max(1, Math.floor(n / 50000));
+  let total = 0;
+  for (let i = 0; i < n; i += stride) {
+    linearToOklab(srgbToLinear(srgb[i * 3]), srgbToLinear(srgb[i * 3 + 1]), srgbToLinear(srgb[i * 3 + 2]), lab);
+    hist[Math.min(255, Math.max(0, Math.round(lab[0] * 255)))]++;
+    total++;
+  }
+  const at = (pct: number) => {
+    let acc = 0;
+    for (let b = 0; b < 256; b++) if ((acc += hist[b]) >= pct * total) return b / 255;
+    return 1;
+  };
+  return [at(loPct), at(hiPct)];
+}
 
 function bestCombo(s: Solver, cbrtYt: number, tLab: ArrayLike<number>) {
   const { labs, wC } = s;
@@ -183,6 +273,11 @@ export function solve(
   const frontColors = p.filaments.map((f) => hexToRgb(f.color));
   const target = [0, 0, 0];
   const tLab = [0, 0, 0];
+  const frontLit = p.mode === 'relief' || p.mode === 'flat';
+  const n = Math.max(0, Math.round(p.colorLayers));
+  const baseLayers = Math.max(1, Math.round(p.baseLayers ?? 1));
+  const frameLayers = Math.max(baseLayers, Math.round(p.frameThickness / p.layerHeight));
+  const [imgLo, imgHi] = frontLit ? lightnessRange(srgb) : [0, 1];
 
   // Pass 1: pick one color stack per color cell (block of pixels).
   const bs = Math.max(1, Math.round(p.colorCellPx ?? 1));
@@ -205,9 +300,16 @@ export function solve(
         }
       sr /= n; sg /= n; sb /= n;
       let combo: number;
-      if (p.dither) {
-        const yt = targetFor(sr, sg, sb, logSmin, target);
-        linearToOklab(target[0], target[1], target[2], tLab);
+      if (frontLit && !p.dither) {
+        frontLitTarget(solver, sr, sg, sb, imgLo, imgHi, tLab);
+        combo = bestCombo(solver, 1, tLab);
+      } else if (p.dither) {
+        let yt = 1;
+        if (frontLit) frontLitTarget(solver, sr, sg, sb, imgLo, imgHi, tLab);
+        else {
+          yt = targetFor(sr, sg, sb, logSmin, target);
+          linearToOklab(target[0], target[1], target[2], tLab);
+        }
         const e = (bx + 1) * 3;
         for (let ch = 0; ch < 3; ch++) tLab[ch] += errCur[e + ch];
         combo = bestCombo(solver, Math.cbrt(yt), tLab);
@@ -236,12 +338,16 @@ export function solve(
       const iy = y - borderPx;
       let combo = 0;
       let t: number;
-      if (ix < 0 || iy < 0 || ix >= imgCols || iy >= imgRows) {
+      const inFrame = ix < 0 || iy < 0 || ix >= imgCols || iy >= imgRows;
+      if (!inFrame) combo = cellCombo[((iy / bs) | 0) * bCols + ((ix / bs) | 0)];
+      if (frontLit) {
+        const used = combos[combo * 3] + combos[combo * 3 + 1] + combos[combo * 3 + 2];
+        t = (inFrame ? frameLayers : baseLayers + (p.mode === 'flat' ? n : used)) * p.layerHeight;
+      } else if (inFrame) {
         t = frameBody;
       } else {
         const si = (iy * imgCols + ix) * 3;
         const yt = targetFor(srgb[si], srgb[si + 1], srgb[si + 2], logSmin, target);
-        combo = cellCombo[((iy / bs) | 0) * bCols + ((ix / bs) | 0)];
         const s = Math.min(1, Math.max(smin, yt / Math.max(lumas[combo], 1e-6)));
         t = Math.min(tmax, tmin - Math.log(s) / a0Y);
       }
@@ -250,15 +356,20 @@ export function solve(
       counts[i * 3 + 2] = combos[combo * 3 + 2];
       body[i] = t;
 
-      const dt = t - tmin;
+      const dt = frontLit ? 0 : t - tmin;
       for (let ch = 0; ch < 3; ch++) {
         const v = trans[combo * 3 + ch] * Math.exp(-dt * a0[ch]) * lc[ch] * light.exposure;
         sim[i * 4 + ch] = linearToSrgb(Math.min(1, v)) * 255;
       }
       sim[i * 4 + 3] = 255;
 
+      // Filament on the viewing face: first stacked layer (litho, bed side) or topmost layer (front-lit).
       let fi = 0;
-      for (let k = 0; k < 3; k++) if (combos[combo * 3 + k] > 0) { fi = k + 1; break; }
+      if (frontLit) {
+        for (let k = 2; k >= 0; k--) if (combos[combo * 3 + k] > 0) { fi = k + 1; break; }
+      } else {
+        for (let k = 0; k < 3; k++) if (combos[combo * 3 + k] > 0) { fi = k + 1; break; }
+      }
       const fc = frontColors[fi];
       front[i * 4] = fc[0] * 255;
       front[i * 4 + 1] = fc[1] * 255;
@@ -268,6 +379,8 @@ export function solve(
   }
 
   return {
+    mode: p.mode ?? 'litho',
+    baseLayers,
     cols,
     rows,
     pixelMm: p.pixelMm,
