@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Turn a photo into a multi-color (up to 4 filaments) lithophane and export it as 3MF." />
+    <title>LumiLayer – multi-color lithophane maker</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23ffe9b0'/><rect x='3' y='3' width='10' height='3' fill='%2300a0e0'/><rect x='3' y='7' width='10' height='3' fill='%23e0007a'/><rect x='3' y='11' width='10' height='2' fill='%23ffe000'/></svg>" />
+  </head>
+  <body>
+    <header>
+      <h1>LumiLayer</h1>
+      <span class="tagline">multi-color lithophanes</span>
+      <div class="spacer"></div>
+      <label class="button">
+        Open photo
+        <input id="file" type="file" accept="image/*" hidden />
+      </label>
+      <button id="export" class="primary">Export 3MF</button>
+    </header>
+    <main>
+      <aside id="controls"></aside>
+      <section id="viewer">
+        <nav class="tabs">
+          <button data-view="backlit" class="active">Backlit</button>
+          <button data-view="front">Unlit (front)</button>
+          <button data-view="3d">3D</button>
+          <label id="light-toggle" hidden><input type="checkbox" checked /> Backlight on</label>
+          <div class="spacer"></div>
+          <span id="status"></span>
+        </nav>
+        <div id="stage">
+          <canvas id="canvas2d" title="Drag to pan, scroll to zoom"></canvas>
+          <div id="stage3d" hidden></div>
+          <div id="drop-hint" hidden>Drop a photo</div>
+        </div>
+        <footer id="info"></footer>
+      </section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
