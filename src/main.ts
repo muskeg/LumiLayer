@@ -157,7 +157,7 @@ const SECTIONS: { title: string; open?: boolean; controls: Ctl[] }[] = [
       { type: 'range', key: 'colorLayers', label: 'Color layers', min: 0, max: 10, step: 1, hint: 'Layers of the front color slab' },
       { type: 'number', key: 'layerHeight', label: 'Layer height', min: 0.04, max: 0.3, step: 0.02, unit: 'mm' },
       { type: 'range', key: 'colorPriority', label: 'Color priority', min: 0, max: 4, step: 0.05, hint: 'Hue accuracy vs. tone accuracy' },
-      { type: 'range', key: 'colorCellMm', label: 'Color cell', min: 0.1, max: 1.2, step: 0.05, unit: 'mm', hint: 'Size of each color dot (rounded to whole pixels). About the nozzle width; smaller = much heavier file' },
+      { type: 'range', key: 'colorCellMm', label: 'Color cell', min: 0.3, max: 1.2, step: 0.05, unit: 'mm', hint: 'Size of each color dot (rounded to whole pixels). Keep it at least the nozzle width: smaller dots cannot be printed and make slicers crawl' },
       { type: 'checkbox', key: 'dither', label: 'Dithering', hint: 'Mix neighbouring color stacks to smooth gradients' },
     ],
   },
@@ -529,6 +529,7 @@ function setupFileInput() {
 }
 
 function setupExport() {
+  const HEAVY_TRIANGLES = 3_000_000;
   const btn = $<HTMLButtonElement>('#export');
   btn.onclick = async () => {
     if (!result) return;
@@ -545,6 +546,16 @@ function setupExport() {
           : [],
       );
       const tris = parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0);
+      if (
+        tris > HEAVY_TRIANGLES &&
+        !confirm(
+          `This model has ${(tris / 1e6).toFixed(1)} M triangles. Slicers may take very long or appear stuck.\n\n` +
+            'To lighten it: raise Color cell, raise Simplify, increase Pixel size or turn off Dithering.\n\nExport anyway?',
+        )
+      ) {
+        setStatus('Export cancelled');
+        return;
+      }
       setStatus(`Writing 3MF (${(tris / 1e6).toFixed(2)} M triangles)…`);
       await tick();
       const data = await write3mf(parts);

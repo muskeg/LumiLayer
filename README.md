@@ -22,7 +22,7 @@ and **3D** shows the geometry.
 - **Depth & resolution**: min/max body thickness, pixel size, simplify tolerance (how much relief error is allowed when
   merging flat areas).
 - **Color mixing**: number of color layers, layer height, color vs. tone priority, color cell size (size of each color dot,
-  roughly the nozzle width), dithering, filament presets, and each
+  at least 0.3 mm because finer dots can't be printed and slow slicers down), dithering, filament presets, and each
   filament's color and *transmission distance* (TD: the thickness in mm at which about 10% of light gets through).
 
 ## Printing
