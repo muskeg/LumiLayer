@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Turn a photo into a multi-color (up to 4 filaments) lithophane and export it as 3MF." />
-    <title>LumiLayer – multi-color lithophane maker</title>
+    <meta name="description" content="Free, open-source tool that turns a photo into a multi-color lithophane or a HueForge-style filament painting and exports 3MF." />
+    <title>LumiLayer – lithophanes and filament paintings</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23ffe9b0'/><rect x='3' y='3' width='10' height='3' fill='%2300a0e0'/><rect x='3' y='7' width='10' height='3' fill='%23e0007a'/><rect x='3' y='11' width='10' height='2' fill='%23ffe000'/></svg>" />
   </head>
   <body>
     <header>
       <h1>LumiLayer</h1>
-      <span class="tagline">multi-color lithophanes</span>
+      <span class="tagline" id="brand-sub">multi-color lithophanes</span>
       <div class="spacer"></div>
       <label class="button">
         Open photo
@@ -31,6 +31,7 @@
         </nav>
         <div id="stage">
           <canvas id="canvas2d" title="Drag to pan, scroll to zoom"></canvas>
+          <canvas id="canvasGl" title="Drag to pan, scroll to zoom" hidden></canvas>
           <div id="stage3d" hidden></div>
           <div id="drop-hint" hidden>Drop a photo</div>
         </div>

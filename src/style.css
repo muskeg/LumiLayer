@@ -223,7 +223,8 @@ input[type='checkbox'] {
   background: #0b0c0f;
 }
 
-#canvas2d {
+#canvas2d,
+#canvasGl {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -232,8 +233,101 @@ input[type='checkbox'] {
   touch-action: none;
 }
 
-#canvas2d:active {
+#canvas2d:active,
+#canvasGl:active {
   cursor: grabbing;
+}
+
+/* Filament painting: profiles and layer stack */
+.profile,
+.band {
+  display: grid;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.profile {
+  grid-template-columns: 30px 1fr 84px 44px 24px;
+}
+
+.band {
+  grid-template-columns: 16px 20px 1fr 88px 24px;
+  grid-template-areas:
+    'handle swatch select label del'
+    'handle swatch slider slider slider';
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.band .handle { grid-area: handle; }
+.band .swatch { grid-area: swatch; }
+.band select { grid-area: select; }
+.band input[type='range'] { grid-area: slider; }
+.band .range-label { grid-area: label; }
+.band button { grid-area: del; }
+
+.band.dragging {
+  opacity: 0.4;
+}
+
+.band.drop-target {
+  border-color: var(--accent);
+}
+
+.handle {
+  cursor: grab;
+  color: var(--muted);
+  user-select: none;
+  text-align: center;
+}
+
+.handle:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: 3px;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.swatch.over {
+  outline: 2px solid #ff6b6b;
+}
+
+button.accent {
+  width: 100%;
+  margin-bottom: 6px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.range-label,
+.profile output {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+button.icon {
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.button-row {
+  display: flex;
+  gap: 6px;
 }
 
 #stage3d {

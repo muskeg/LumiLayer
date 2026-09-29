@@ -1,9 +1,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { addBody, MeshBuilder } from './mesh';
-import { colorSlabThickness, type LithoResult } from './lithophane';
+import { addBody, MeshBuilder, type Heightfield } from './mesh';
 
 const MAX_GRID = 320;
+
+/** What to show: a lithophane (viewed from the bed side) or a front-lit print (viewed from the top). */
+export interface Preview3DInput {
+  frontLit: boolean;
+  hf: Heightfield;
+  /** Litho: color slab thickness under the body. */
+  slab: number;
+  baseColor: string;
+}
 
 export class Preview3D {
   private renderer: THREE.WebGLRenderer;
@@ -12,6 +20,7 @@ export class Preview3D {
   private controls: OrbitControls;
   private group = new THREE.Group();
   private bodyMat = new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide });
+  private backMat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
   private faceMat = new THREE.MeshBasicMaterial();
   private simTex: THREE.CanvasTexture | null = null;
   private frontTex: THREE.CanvasTexture | null = null;
@@ -46,15 +55,15 @@ export class Preview3D {
     this.render();
   }
 
-  update(r: LithoResult, sim: HTMLCanvasElement, front: HTMLCanvasElement) {
+  update(input: Preview3DInput, sim: HTMLCanvasElement, front: HTMLCanvasElement) {
     for (const child of [...this.group.children]) {
       this.group.remove(child);
       (child as THREE.Mesh).geometry.dispose();
     }
+    const r = input.hf;
     const w = r.cols * r.pixelMm;
     const h = r.rows * r.pixelMm;
-    const frontLit = r.mode !== 'litho';
-    const slab = frontLit ? 0 : colorSlabThickness(r);
+    const { frontLit, slab } = input;
 
     const b = new MeshBuilder();
     // No bottom: the textured face covers it (drawing both causes z-fighting).
@@ -78,16 +87,15 @@ export class Preview3D {
     geo.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
     geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
     geo.computeVertexNormals();
-    this.bodyMat.color.set(frontLit ? '#ffffff' : r.filaments[0].color);
+    this.bodyMat.color.set(frontLit ? '#ffffff' : input.baseColor);
     this.group.add(new THREE.Mesh(geo, this.bodyMat));
 
-    if (!frontLit) {
-      // Textured viewing face; the plane is rotated to face -Z (the bed side).
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.faceMat);
-      plane.rotation.y = Math.PI;
-      plane.position.set(w / 2, h / 2, 0);
-      this.group.add(plane);
-    }
+    // Litho: textured viewing face. Painting: the back of the print, which is the first band's filament.
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), frontLit ? this.backMat : this.faceMat);
+    this.backMat.color.set(input.baseColor);
+    plane.rotation.y = Math.PI;
+    plane.position.set(w / 2, h / 2, 0);
+    this.group.add(plane);
 
     this.simTex?.dispose();
     this.frontTex?.dispose();
@@ -101,7 +109,7 @@ export class Preview3D {
     this.key.position.set(-1, 1.5, frontLit ? 2 : -2);
     this.applyFaceTexture();
 
-    const size = `${r.mode}:${w.toFixed(1)}x${h.toFixed(1)}`;
+    const size = `${frontLit}:${w.toFixed(1)}x${h.toFixed(1)}`;
     if (size !== this.framedSize) {
       this.framedSize = size;
       this.controls.target.set(w / 2, h / 2, frontLit ? 0 : 1);

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { unzipSync, strFromU8 } from 'fflate';
 import { buildSolver, solve, type LithoParams } from './lithophane';
 import { buildPrintMeshes, type Mesh } from './mesh';
-import { suggestPalette } from './palette';
+import { buildPainting3mf, buildPaintingParts, materialOfLayers, type PaintExportInput } from './paint/export';
+import { DEFAULT_PROFILES, FRAME_SENTINEL, layersFromLuminance, normalizeStack, resolveStack, type Band, type FilamentProfile } from './paint/model';
+import { suggestStack } from './paint/suggest';
+import { bandOptics, bestLayer, pathLabs, targetLab } from './paint/optics';
 import { write3mf } from './threemf';
 
 const params = (over: Partial<LithoParams> = {}): LithoParams => ({
@@ -141,76 +144,134 @@ describe('meshes', () => {
   });
 });
 
-describe('front-lit (relief / flat)', () => {
-  const frontParams = (mode: 'relief' | 'flat', over: Partial<LithoParams> = {}) =>
-    params({
-      mode,
-      baseLayers: 4,
-      colorLayers: 6,
-      layerHeight: 0.08,
-      frameThickness: 0.8,
-      dither: true,
-      filaments: [
-        { name: 'White', color: '#f4f1e8', td: 3, enabled: true },
-        { name: 'Cyan', color: '#00a0e0', td: 1.5, enabled: true },
-        { name: 'Magenta', color: '#e0007a', td: 1.5, enabled: true },
-        { name: 'Yellow', color: '#ffe000', td: 2, enabled: true },
-      ],
-      ...over,
-    });
+describe('filament painting', () => {
+  const lh = 0.08;
+  const profiles: FilamentProfile[] = [
+    { id: 'black', name: 'Black', color: '#141414', td: 0.6 },
+    { id: 'red', name: 'Red', color: '#c8102e', td: 1.2 },
+    { id: 'white', name: 'White', color: '#f2f2ee', td: 2.5 },
+  ];
+  // Black, Red, White, then Black again on top: 4 bands but only 3 materials.
+  const bands: Band[] = [
+    { filamentId: 'black', top: 6 },
+    { filamentId: 'red', top: 10 },
+    { filamentId: 'white', top: 16 },
+    { filamentId: 'black', top: 18 },
+  ];
 
-  it('picks no color on white and heavy stacks on dark or saturated colors', () => {
-    const r = run([[1, 1, 1], [0.1, 0.1, 0.1], [1, 0, 0]], 3, 1, frontParams('relief', { dither: false }));
-    expect([...r.counts.slice(0, 3)]).toEqual([0, 0, 0]);
-    const sum = (i: number) => r.counts[i * 3] + r.counts[i * 3 + 1] + r.counts[i * 3 + 2];
-    expect(sum(1)).toBeGreaterThanOrEqual(4);
-    expect(r.counts[2 * 3]).toBe(0);
-    expect(r.counts[2 * 3 + 1] + r.counts[2 * 3 + 2]).toBeGreaterThan(0);
+  const paintInput = (cols: number, rows: number, seed: number): PaintExportInput => {
+    const heights = Float32Array.from(randomImage(cols, rows, seed), (p) => layersFromLuminance(p[0], 3, 18, 18) * lh);
+    return { heights, cols, rows, widthMm: cols * 0.5, heightMm: rows * 0.5, baseHeight: 3 * lh, layerHeight: lh, stack: resolveStack(bands, profiles, lh) };
+  };
+
+  it('quantizes luminance to whole layers like the shader, with a frame sentinel', () => {
+    expect(layersFromLuminance(0, 4, 20, 9)).toBe(4);
+    expect(layersFromLuminance(1, 4, 20, 9)).toBe(20);
+    expect(layersFromLuminance(0.5, 4, 20, 9)).toBe(12);
+    expect(layersFromLuminance(FRAME_SENTINEL, 4, 20, 9)).toBe(9);
   });
 
-  for (const mode of ['relief', 'flat'] as const) {
-    it(`${mode}: closed meshes with exact part volumes`, () => {
-      const r = run(randomImage(14, 9, 11), 14, 9, frontParams(mode), 2);
-      const meshes = buildPrintMeshes(r);
-      const vols = meshes.map((m) => (m ? expectClosed(m) : 0));
-      const n = r.cols * r.rows, cell = 0.5 * 0.5 * 0.08;
-      let colorLayers = 0, totalLayers = 0;
-      for (let f = 0; f < 3; f++) {
-        let layers = 0;
-        for (let i = 0; i < n; i++) layers += r.counts[i * 3 + f];
-        expect(vols[f + 1]).toBeCloseTo(layers * cell, 5);
-        colorLayers += layers;
-      }
-      for (let i = 0; i < n; i++) totalLayers += Math.round(r.body[i] / 0.08);
-      expect(vols[0]).toBeCloseTo((totalLayers - colorLayers) * cell, 5);
-      if (mode === 'flat') {
-        for (let y = 2; y < r.rows - 2; y++) for (let x = 2; x < r.cols - 2; x++) expect(r.body[y * r.cols + x]).toBeCloseTo(10 * 0.08, 6);
+  it('resolves bands to Z ranges and shares material ids per filament', () => {
+    const s = resolveStack(bands, profiles, lh);
+    expect(s.map((l) => l.materialId)).toEqual([0, 1, 2, 0]);
+    expect(s[1].startZ).toBeCloseTo(0.48, 6);
+    expect(s[1].endZ).toBeCloseTo(0.8, 6);
+  });
+
+  it('repairs invalid stacks', () => {
+    const fixed = normalizeStack([{ filamentId: 'missing', top: 5 }, { filamentId: 'red', top: 3 }], profiles);
+    expect(fixed[0].filamentId).toBe('black');
+    expect(fixed[1].top).toBe(6);
+  });
+
+  it('assigns each layer to the band containing its mid-height', () => {
+    const m = materialOfLayers(resolveStack(bands, profiles, lh), lh, 20);
+    expect([...m]).toEqual([0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0]);
+  });
+
+  it('builds one closed part per filament, each confined to its own bands', () => {
+    const input = paintInput(18, 12, 3);
+    const parts = buildPaintingParts(input);
+    expect(parts.map((p) => p.name)).toEqual(['Black', 'Red', 'White']);
+    let volume = 0;
+    parts.forEach((p, m) => {
+      volume += expectClosed(p.mesh);
+      const ranges = input.stack.filter((s) => s.materialId === m);
+      for (let i = 2; i < p.mesh.positions.length; i += 3) {
+        const z = p.mesh.positions[i];
+        expect(ranges.some((r) => z >= r.startZ - 1e-5 && z <= r.endZ + 1e-5), `${p.name} z=${z}`).toBe(true);
       }
     });
-  }
-});
+    const expected = input.heights.reduce((s, h) => s + h * 0.25, 0);
+    expect(volume).toBeCloseTo(expected, 4);
+  });
 
-describe('palette suggestion', () => {
-  it('includes blue and a dark filament for a blue-sky image with dark ground', async () => {
-    const pixels = Array.from({ length: 400 }, (_, i) => (i < 240 ? [0.45, 0.6, 0.85] : i < 320 ? [0.05, 0.05, 0.05] : [0.95, 0.93, 0.88]));
-    const pal = await suggestPalette(Float32Array.from(pixels.flat()), 0.08, 12);
-    const names = pal.map((f) => f.name);
-    expect(names.some((n) => ['Blue', 'Cyan', 'Navy'].includes(n))).toBe(true);
-    expect(names.some((n) => ['Black', 'Charcoal', 'Navy'].includes(n))).toBe(true);
-    expect(new Set(names).size).toBe(4);
+  it('reads correctly from the top: image column 0 at x = 0', () => {
+    // Left column tall enough to reach white, right column stays black.
+    const heights = Float32Array.from([16, 3, 16, 3], (l) => l * lh);
+    const parts = buildPaintingParts({ heights, cols: 2, rows: 2, widthMm: 1, heightMm: 1, baseHeight: 3 * lh, layerHeight: lh, stack: resolveStack(bands, profiles, lh) });
+    const white = parts.find((p) => p.name === 'White')!;
+    const xs = [...white.mesh.positions].filter((_, i) => i % 3 === 0);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(0.5 + 1e-6);
+  });
+
+  it('packages a 3MF with base materials, one component per part and slot assignments', () => {
+    const { bytes, parts } = buildPainting3mf(paintInput(10, 8, 9));
+    const files = unzipSync(bytes);
+    expect(Object.keys(files).sort()).toEqual(['3D/3dmodel.model', 'Metadata/model_settings.config', '[Content_Types].xml', '_rels/.rels'].sort());
+    const xml = strFromU8(files['3D/3dmodel.model']);
+    expect(xml.match(/<base /g)?.length).toBe(parts);
+    expect(xml.match(/<component /g)?.length).toBe(parts);
+    expect(xml).toContain('pid="1" pindex="2"');
+    const cfg = strFromU8(files['Metadata/model_settings.config']);
+    expect(cfg).toContain('<metadata key="extruder" value="3"/>');
   });
 });
 
-describe('front-lit orientation', () => {
-  it('maps image left to low X when viewed from the top', () => {
-    const img = [[1, 1, 1], [0, 0, 0]];
-    const p = params({ mode: 'flat', baseLayers: 2, colorLayers: 4, layerHeight: 0.1 });
-    const r = run(img, 2, 1, p);
-    // The dark (right) pixel gets color layers; its part must sit at the high-X half.
-    const meshes = buildPrintMeshes(r);
-    const colorPos = meshes.slice(1).flatMap((m) => (m ? [...m.positions] : []));
-    const xs = colorPos.filter((_, i) => i % 3 === 0);
-    expect(Math.min(...xs)).toBeGreaterThanOrEqual(0.5 - 1e-6);
+describe('stack suggestion', () => {
+  // Dark pixels are near-black, mid pixels red, bright pixels near-white.
+  const image = (n: number) =>
+    Float32Array.from(Array.from({ length: n }, (_, i) => (i % 3 === 0 ? [0.06, 0.06, 0.06] : i % 3 === 1 ? [0.82, 0.13, 0.13] : [0.95, 0.95, 0.94])).flat());
+  const base = { invert: false, minLayers: 4, maxLayers: 24, layerHeight: 0.08, profiles: DEFAULT_PROFILES };
+  const bands3: Band[] = [{ filamentId: 'black', top: 10 }, { filamentId: 'red', top: 18 }, { filamentId: 'white', top: 30 }];
+
+  it('picks dark → red → light from the profiles, within 4 AMS slots', async () => {
+    const { bands } = await suggestStack({ ...base, srgb: image(300) });
+    const names = bands.map((b) => DEFAULT_PROFILES.find((p) => p.id === b.filamentId)!.name);
+    expect(new Set(names).size).toBeLessThanOrEqual(4);
+    expect(names.some((n) => ['Red', 'Orange', 'Magenta', 'Brown'].includes(n))).toBe(true);
+    expect(['Black', 'Charcoal', 'Brown']).toContain(names[0]);
+    expect(['White', 'Ivory']).toContain(names[names.length - 1]);
+    for (let i = 1; i < bands.length; i++) expect(bands[i].top).toBeGreaterThan(bands[i - 1].top);
+    expect(bands[bands.length - 1].top).toBeLessThanOrEqual(80);
+  });
+
+  it('color-match heights put each color at the height that prints it', () => {
+    const stack = resolveStack(bands3, DEFAULT_PROFILES, 0.08);
+    const path = pathLabs(bandOptics(stack, 0.08), 0.08, 1, 30);
+    const at = (r: number, g: number, b: number) => {
+      const t = [0, 0, 0];
+      targetLab(r, g, b, t);
+      return bestLayer(path, 1, t[0], t[1], t[2]);
+    };
+    const black = at(0.08, 0.08, 0.08), red = at(0.78, 0.06, 0.18), white = at(0.95, 0.95, 0.93);
+    expect(black).toBeLessThanOrEqual(10);
+    expect(red).toBeGreaterThan(10);
+    expect(red).toBeLessThanOrEqual(18);
+    expect(white).toBeGreaterThan(18);
+  });
+
+  it('respects a smaller slot budget and only uses given profiles', async () => {
+    const profiles = DEFAULT_PROFILES.filter((p) => ['black', 'white', 'blue'].includes(p.id));
+    const { bands } = await suggestStack({ ...base, profiles, maxFilaments: 2, srgb: image(90) });
+    expect(new Set(bands.map((b) => b.filamentId)).size).toBeLessThanOrEqual(2);
+    expect(bands.every((b) => profiles.some((p) => p.id === b.filamentId))).toBe(true);
+  });
+
+  it('never spends two AMS slots on near-identical colors', async () => {
+    const { bands } = await suggestStack({ ...base, srgb: image(300) });
+    const ids = new Set(bands.map((b) => b.filamentId));
+    expect(ids.has('white') && ids.has('ivory')).toBe(false);
   });
 });
 

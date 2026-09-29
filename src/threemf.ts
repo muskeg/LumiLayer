@@ -1,4 +1,4 @@
-import { strToU8, zip, type Zippable } from 'fflate';
+import { strToU8, zip, zipSync, type Zippable } from 'fflate';
 import type { Mesh } from './mesh';
 
 export interface Part {
@@ -55,7 +55,7 @@ class XmlWriter {
   }
 }
 
-export function buildModelXml(parts: Part[]) {
+export function buildModelXml(parts: Part[], title = 'LumiLayer lithophane') {
   const w = new XmlWriter();
   const assemblyId = parts.length + 2;
   w.push(
@@ -77,12 +77,12 @@ export function buildModelXml(parts: Part[]) {
       w.push(`<triangle v1="${ind[i]}" v2="${ind[i + 1]}" v3="${ind[i + 2]}"/>\n`);
     w.push('    </triangles>\n   </mesh>\n  </object>\n');
   });
-  w.push(`  <object id="${assemblyId}" type="model" name="LumiLayer lithophane">\n   <components>\n`);
+  w.push(`  <object id="${assemblyId}" type="model" name="${escapeXml(title)}">\n   <components>\n`);
   parts.forEach((_, idx) => w.push(`    <component objectid="${idx + 2}"/>\n`));
   w.push(`   </components>\n  </object>\n </resources>\n <build>\n  <item objectid="${assemblyId}"/>\n </build>\n</model>\n`);
 
   // Bambu Studio / Orca part metadata: names and extruder (AMS slot) per part.
-  let cfg = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n <object id="${assemblyId}">\n  <metadata key="name" value="LumiLayer lithophane"/>\n  <metadata key="extruder" value="1"/>\n`;
+  let cfg = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n <object id="${assemblyId}">\n  <metadata key="name" value="${escapeXml(title)}"/>\n  <metadata key="extruder" value="1"/>\n`;
   parts.forEach((p, idx) => {
     cfg += `  <part id="${idx + 2}" subtype="normal_part">\n   <metadata key="name" value="${escapeXml(p.name)}"/>\n   <metadata key="extruder" value="${p.extruder}"/>\n  </part>\n`;
   });
@@ -91,15 +91,24 @@ export function buildModelXml(parts: Part[]) {
   return { model: w.bytes(), config: strToU8(cfg) };
 }
 
-export function write3mf(parts: Part[]): Promise<Uint8Array> {
-  const { model, config } = buildModelXml(parts);
-  const files: Zippable = {
+function packageFiles(parts: Part[], title?: string): Zippable {
+  const { model, config } = buildModelXml(parts, title);
+  return {
     '[Content_Types].xml': strToU8(CONTENT_TYPES),
     '_rels/.rels': strToU8(RELS),
     '3D/3dmodel.model': model,
     'Metadata/model_settings.config': config,
   };
+}
+
+export function write3mf(parts: Part[], title?: string): Promise<Uint8Array> {
+  const files = packageFiles(parts, title);
   return new Promise((resolve, reject) =>
     zip(files, { level: 6 }, (err, data) => (err ? reject(err) : resolve(data))),
   );
+}
+
+/** Synchronous variant for use inside a Web Worker (no nested workers). */
+export function write3mfSync(parts: Part[], title?: string): Uint8Array {
+  return zipSync(packageFiles(parts, title), { level: 6 });
 }
