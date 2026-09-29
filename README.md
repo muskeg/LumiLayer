@@ -3,11 +3,13 @@
 A free, open-source browser app that turns a photo into a multi-color 3D print and exports a ready-to-slice **3MF**.
 Everything runs locally in your browser. Your photos are never uploaded.
 
-Two modes:
+Three modes:
 
 - **Lithophane (backlit)**: viewed with a light behind it, with an optional thin CMY-style color slab.
-- **Filament painting (front-lit)**: a HueForge-style relief. Height comes from image brightness, and each height band
+- **Filament painting (front-lit)**: a layered relief. Height comes from image brightness, and each height band
   is printed in one filament, so the colors come from how the translucent layers stack.
+- **Filament mosaic (front-lit)**: every nozzle-wide tile gets its own short combo of filaments on a shared ground, so
+  4 filaments reach hundreds of colors instead of the single color curve of a band stack.
 
 ## How it works
 
@@ -25,7 +27,7 @@ The print has two zones, and you look at it from the side that was on the bed:
 - **Heights**:
   - **Best color match** (default): each pixel gets the height whose printed color (per the stack) is closest to the
     pixel's color. The GPU computes this per pixel, and the export reads the exact heights back from the shader.
-  - **From brightness** (classic HueForge): `minHeight + luminance × (stackTop − minHeight)`, rounded to whole layers,
+  - **From brightness** (plain heightmap): `minHeight + luminance × (stackTop − minHeight)`, rounded to whole layers,
     optionally inverted.
 - **Layer stack**: bands from the bed up (e.g. Black 0–0.64 mm, Red 0.64–0.96 mm, …, White). Sliders move a band's top;
   drag ⠿ (or focus it and use ↑/↓) to reorder filaments. The same filament may appear in several bands. Each band shows
@@ -43,9 +45,28 @@ The print has two zones, and you look at it from the side that was on the bed:
   into a 3MF with `basematerials`, one component per part, and Bambu/Orca slot assignments. Each printed layer contains
   exactly one filament, so the slicer only swaps at band boundaries.
 
+### Filament mosaic
+
+- **Tile combos**: a tile is the ground filament (loadout slot 1, usually black) plus up to *Segments* segments of
+  loadout filaments within *Tint layers* layers (default 8 × 0.08 mm, 3 segments). Every such combo is enumerated, and
+  combos that print the same color collapse to the simplest one. Each tile of the image takes the combo whose predicted
+  color is closest (weighted Oklab, k-d tree), with optional dithering. Islands smaller than *Min island* tiles are
+  merged into their closest neighbor.
+- **Optics**: per-channel Kubelka–Munk. A filament's color is how a thick piece looks; its TD sets how much it scatters
+  (after one TD, 5% of the contrast between a white and a black background is left). Translucent filaments therefore
+  tint what's under them: thin translucent red on white is red, on yellow it's orange-red.
+- **Stepped / level**: stepped tiles are only as tall as their combo; level pads each tile with ground filament.
+- **Loadout**: pick up to 4 filaments (one AMS), or **Auto-pick loadout** to rank every loadout from your profiles for
+  the image (ground = darkest filament of the loadout).
+- **Swatch plate**: download it, print it, then tune each filament's color and TD until the *Swatches* view looks like
+  the print. Rows: a ramp of the lightest filament (1–8 layers); each tint at 1, 2, 3, 5 layers on the ground and on 6
+  layers of the lightest one; then layered pairs. The notched corner is top-left.
+- **Export**: one closed part per loadout filament from the voxel grid. Most tint layers need filament swaps, so
+  expect far more purging than a band painting.
+
 ### Controls
 
-- **Mode**: lithophane or filament painting.
+- **Mode**: lithophane, filament painting or filament mosaic.
 - **Framing**: width, aspect, rotate, mirror, zoom/pan (drag and scroll on the preview), frame width and height.
 - **Image**: brightness, contrast, gamma (and saturation for lithophanes).
 - **Depth & resolution**: min/max body thickness (lithophane); minimum height and invert (painting); layer height; pixel
@@ -53,6 +74,7 @@ The print has two zones, and you look at it from the side that was on the bed:
 - **Color mixing** (lithophane): color layers, color vs. tone priority, color cell size (0.3 mm minimum), dithering,
   filament presets. Here TD is the thickness at which ~10% of light gets through.
 - **Layer stack** and **Filaments** (painting): see above.
+- **Filament mosaic** and **Filaments** (mosaic): see above. Filament profiles are shared with painting.
 
 ## Printing
 
@@ -63,6 +85,8 @@ The print has two zones, and you look at it from the side that was on the bed:
   (default 0.10 mm).
 - **Filament painting** (viewing face up): set the layer height to the painting's layer height (default 0.08 mm). The
   first layer must be a whole multiple of it (e.g. 0.24 mm). Otherwise every layer is offset from the bands.
+- **Filament mosaic** (viewing face up): same as filament painting. Keep the pixel (tile) size at least your nozzle
+  width (default 0.4 mm).
 
 ## Development
 

@@ -122,6 +122,33 @@ export function loadStack(profiles: FilamentProfile[]): Band[] {
 
 export const saveStack = (bands: Band[]) => writeJson(STACK_KEY, bands);
 
+const LOADOUT_KEY = 'lumilayer.loadout.v1';
+
+/** Filament mosaic loadout: profile ids, slot 0 is the ground. Unknown ids and duplicates are dropped. */
+export function normalizeLoadout(ids: unknown, profiles: FilamentProfile[], slots: number): string[] {
+  const known = new Set(profiles.map((p) => p.id));
+  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string' && known.has(id)) : [];
+  const out = [...new Set(list)].slice(0, slots);
+  return out.length ? out : defaultLoadout(profiles, slots);
+}
+
+/** Darkest profile as the ground, then the lightest, then the most saturated ones. */
+export function defaultLoadout(profiles: FilamentProfile[], slots: number): string[] {
+  const stats = profiles.map((p) => {
+    const n = parseInt(p.color.slice(1), 16);
+    const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+    return { id: p.id, luma: lumaOf(r, g, b), chroma: Math.max(r, g, b) - Math.min(r, g, b) };
+  });
+  const dark = stats.reduce((a, b) => (b.luma < a.luma ? b : a));
+  const light = stats.filter((s) => s !== dark).reduce<(typeof stats)[number] | null>((a, b) => (!a || b.luma > a.luma ? b : a), null);
+  const saturated = stats.filter((s) => s !== dark && s !== light).sort((a, b) => b.chroma - a.chroma);
+  return [dark, light, ...saturated].filter((s): s is (typeof stats)[number] => !!s).slice(0, slots).map((s) => s.id);
+}
+
+export const restoreLoadout = (profiles: FilamentProfile[], slots: number) => normalizeLoadout(readJson(LOADOUT_KEY), profiles, slots);
+
+export const storeLoadout = (ids: string[]) => writeJson(LOADOUT_KEY, ids);
+
 /** Brightness used for the heightmap (Rec. 709 weights on sRGB values, like a standard grayscale conversion). */
 export const lumaOf = (r: number, g: number, b: number) => Math.min(1, Math.max(0, 0.2126 * r + 0.7152 * g + 0.0722 * b));
 

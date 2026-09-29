@@ -7,6 +7,17 @@ import { DEFAULT_PROFILES, FRAME_SENTINEL, layersFromLuminance, normalizeStack, 
 import { suggestStack } from './paint/suggest';
 import { bandOptics, bestLayer, pathLabs, targetLab } from './paint/optics';
 import { write3mf } from './threemf';
+import { filamentOptics, stackOn, TD_CONTRAST } from './paint/km';
+import {
+  buildCombos, mosaicStats, mosaicVoxels, EMPTY, KdTree, loadoutOptics, combosFromList, mergeIslands, solveMosaic,
+  type MosaicFilament, type ComboConfig,
+} from './paint/mosaic';
+import { buildMosaicParts, type MosaicExportInput } from './paint/export';
+import { swatchPlate, swatchRows } from './paint/swatches';
+import { defaultLoadout, normalizeLoadout } from './paint/model';
+import { gamutError, pickLoadout } from './paint/loadout';
+import { sampleImage } from './paint/suggest';
+import { srgbToLinear } from './color';
 
 const params = (over: Partial<LithoParams> = {}): LithoParams => ({
   pixelMm: 0.5,
@@ -290,4 +301,168 @@ describe('3mf', () => {
     expect(xml.match(/<component /g)?.length).toBe(parts.length);
     expect(xml).toContain('<build>');
   });
+});
+
+describe('Kubelka-Munk optics', () => {
+  it('converges to the filament color when thick', () => {
+    const f = filamentOptics('#c8102e', 0.4, 0.08, 40);
+    const c = [0, 0, 0];
+    stackOn(f, 40, c);
+    [0xc8, 0x10, 0x2e].forEach((v, ch) => expect(c[ch]).toBeCloseTo(Math.max(0.002, srgbToLinear(v / 255)), 2));
+  });
+
+  it('leaves TD_CONTRAST of the background visible after one TD', () => {
+    const f = filamentOptics('#1f8a3c', 0.8, 0.08, 16);
+    let worst = 0;
+    for (let ch = 0; ch < 3; ch++) {
+      const white = [1, 1, 1], black = [0, 0, 0];
+      stackOn(f, 10, white);
+      stackOn(f, 10, black);
+      worst = Math.max(worst, white[ch] - black[ch]);
+    }
+    expect(worst).toBeCloseTo(TD_CONTRAST, 3);
+  });
+
+  it('makes translucent filaments act as filters (subtractive, not a blend)', () => {
+    const red = filamentOptics('#d0102a', 8, 0.08, 16);
+    const yellow = [...[0xf5 / 255, 0xc4 / 255, 0].map(srgbToLinear)];
+    const onWhite = [0.9, 0.9, 0.9];
+    stackOn(red, 3, onWhite);
+    expect(onWhite[0]).toBeGreaterThan(0.5);
+    expect(onWhite[1]).toBeLessThan(onWhite[0] / 3);
+    const onYellow = [...yellow];
+    stackOn(red, 3, onYellow);
+    // Green is absorbed, red passes: the result is darker in green than both the yellow and a 50/50 mix.
+    expect(onYellow[1]).toBeLessThan(yellow[1] * 0.5);
+    expect(onYellow[0]).toBeGreaterThan(0.4);
+  });
+});
+
+describe('filament mosaic', () => {
+  const loadout: MosaicFilament[] = [
+    { name: 'Black', color: '#141414', td: 0.6 },
+    { name: 'White', color: '#f2f2ee', td: 2.5 },
+    { name: 'Red', color: '#d0102a', td: 6 },
+    { name: 'Blue', color: '#1f4fd8', td: 4 },
+  ];
+  const cfg: ComboConfig = { layerHeight: 0.08, groundLayers: 4, tintLayers: 8, maxSegments: 3 };
+  const optics = loadoutOptics(loadout, cfg);
+
+  it('enumerates every valid combo once', () => {
+    const set = buildCombos(loadout, optics, cfg, false);
+    // 1 bare ground + 3·C(8,1) + 3·3·C(8,2) + 3·3·3·C(8,3)
+    expect(set.count).toBe(1 + 24 + 252 + 1512);
+    for (let r = 0; r < set.count; r++) {
+      const s0 = set.segStart[r], s1 = set.segStart[r + 1];
+      expect(s1 - s0).toBeLessThanOrEqual(3);
+      let total = 0;
+      for (let s = s0; s < s1; s++) {
+        total += set.segLen[s];
+        if (s === s0) expect(set.segFil[s]).not.toBe(0);
+        else expect(set.segFil[s]).not.toBe(set.segFil[s - 1]);
+      }
+      expect(total).toBe(set.layers[r]);
+      expect(total).toBeLessThanOrEqual(8);
+    }
+    const deduped = buildCombos(loadout, optics, cfg);
+    expect(deduped.count).toBeLessThan(set.count);
+    expect(deduped.count).toBeGreaterThan(50);
+  });
+
+  it('k-d tree finds the true nearest neighbour', () => {
+    const pts = Float32Array.from(randomImage(500, 1, 7).flat());
+    const tree = new KdTree(pts);
+    for (const [x, y, z] of randomImage(200, 1, 8)) {
+      let best = -1, bestD = Infinity;
+      for (let i = 0; i < 500; i++) {
+        const d = (pts[i * 3] - x) ** 2 + (pts[i * 3 + 1] - y) ** 2 + (pts[i * 3 + 2] - z) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      expect(tree.nearest(x, y, z)).toBe(best);
+    }
+  });
+
+  it('reaches colors off the single band curve: pink, navy, white and black side by side', () => {
+    const set = buildCombos(loadout, optics, cfg);
+    const srgb = Float32Array.from([[0.95, 0.55, 0.62], [0.08, 0.12, 0.4], [0.93, 0.93, 0.92], [0.05, 0.05, 0.05]].flat());
+    const res = solveMosaic(srgb, 4, 1, 0, set, new KdTree(set.lab), { stepped: true, dither: false, minIsland: 0, frameLayers: 1 });
+    const segs = (p: number) => {
+      const r = res.combo[p], out: number[] = [];
+      for (let s = set.segStart[r]; s < set.segStart[r + 1]; s++) out.push(set.segFil[s]);
+      return out;
+    };
+    expect(segs(0)).toContain(1);
+    expect(segs(0)).toContain(2);
+    expect(segs(1)).toContain(3);
+    expect(segs(2)[segs(2).length - 1]).toBe(1);
+    expect(res.layers[3]).toBeLessThan(res.layers[2]);
+  });
+
+  it('merges small islands into the closest neighbouring combo', () => {
+    const set = buildCombos(loadout, optics, cfg);
+    const combo = new Int32Array(25).fill(5);
+    combo[12] = 9;
+    combo[0] = -1;
+    mergeIslands(combo, 5, 5, set, 2);
+    expect(combo[12]).toBe(5);
+    expect(combo[0]).toBe(-1);
+  });
+
+  const exportOf = (res: ReturnType<typeof solveMosaic>): MosaicExportInput => {
+    const { voxels, K } = mosaicVoxels(res);
+    return { kind: 'mosaic', voxels, cols: res.cols, rows: res.rows, K, widthMm: res.cols * 0.4, heightMm: res.rows * 0.4, layerHeight: 0.08, filaments: loadout };
+  };
+
+  for (const stepped of [true, false])
+    it(`exports closed per-filament meshes whose volumes add up (${stepped ? 'stepped' : 'level'})`, () => {
+      const set = buildCombos(loadout, optics, cfg);
+      const cols = 14, rows = 9;
+      const res = solveMosaic(Float32Array.from(randomImage(cols, rows, 4).flat()), cols, rows, 2, set, new KdTree(set.lab), { stepped, dither: true, minIsland: 0, frameLayers: 6 });
+      if (!stepped) for (let p = 0; p < res.combo.length; p++) if (res.combo[p] >= 0) expect(res.layers[p]).toBe(4 + 8);
+      const parts = buildMosaicParts(exportOf(res));
+      let volume = 0;
+      for (const p of parts) volume += expectClosed(p.mesh);
+      const expected = [...res.layers].reduce((s, l) => s + l * 0.08 * 0.16, 0);
+      expect(volume).toBeCloseTo(expected, 3);
+      const st = mosaicStats(res);
+      expect(st.combos).toBeGreaterThan(1);
+      expect(st.share[0]).toBe(1);
+    });
+
+  it('builds a swatch plate with a notch and closed meshes', () => {
+    const rows = swatchRows(loadout);
+    expect(rows.map((r) => r.label)).toEqual([
+      'White ramp: 1–8 layers',
+      'Red: 1, 2, 3, 5 layers on ground | on White',
+      'Blue: 1, 2, 3, 5 layers on ground | on White',
+      'Layered pairs (lower → upper)',
+    ]);
+    const set = combosFromList(loadout, optics, cfg, rows.flatMap((r) => r.swatches));
+    const res = swatchPlate(rows, set, 0.4);
+    expect(res.combo[0]).toBe(EMPTY);
+    expect(res.layers[0]).toBe(0);
+    const parts = buildMosaicParts(exportOf(res));
+    expect(parts).toHaveLength(4);
+    for (const p of parts) expectClosed(p.mesh);
+  });
+
+  it('picks a default loadout and repairs stored ones', () => {
+    const ids = defaultLoadout(DEFAULT_PROFILES, 4);
+    expect(ids[0]).toBe('black');
+    expect(ids[1]).toBe('white');
+    expect(ids).toHaveLength(4);
+    expect(normalizeLoadout(['white', 'nope', 'white', 'red'], DEFAULT_PROFILES, 4)).toEqual(['white', 'red']);
+    expect(normalizeLoadout('garbage', DEFAULT_PROFILES, 4)).toEqual(ids);
+  });
+
+  it('auto-picks a loadout at least as good as the default one', async () => {
+    const srgb = Float32Array.from(Array.from({ length: 200 }, (_, i) => [[0.95, 0.55, 0.62], [0.08, 0.12, 0.4], [0.93, 0.93, 0.92], [0.05, 0.05, 0.05]][i % 4]).flat());
+    const cfg2: ComboConfig = { ...cfg, tintLayers: 6, maxSegments: 2 };
+    const { ids, error } = await pickLoadout({ srgb, profiles: DEFAULT_PROFILES, slots: 4, config: cfg2 });
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeLessThanOrEqual(4);
+    const def = defaultLoadout(DEFAULT_PROFILES, 4).map((id) => DEFAULT_PROFILES.find((p) => p.id === id)!);
+    const defSet = buildCombos(def, loadoutOptics(def, cfg2), cfg2);
+    expect(error).toBeLessThanOrEqual(gamutError(defSet, sampleImage(srgb, false), new KdTree(defSet.lab)) * 1.05);
+  }, 30_000);
 });

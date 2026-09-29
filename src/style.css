@@ -214,6 +214,10 @@ input[type='checkbox'] {
 #status {
   color: var(--muted);
   font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #stage {
@@ -236,6 +240,18 @@ input[type='checkbox'] {
 #canvas2d:active,
 #canvasGl:active {
   cursor: grabbing;
+}
+
+#canvas2d.crisp {
+  image-rendering: pixelated;
+}
+
+.slot-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 32px;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
 }
 
 /* Filament painting: profiles and layer stack */

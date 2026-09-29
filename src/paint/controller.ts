@@ -11,7 +11,7 @@ import { suggestStack } from './suggest';
 import type { WorkerResponse } from './threeMfWorker';
 
 /** Filament slots of a single AMS unit. */
-const AMS_SLOTS = 4;
+export const AMS_SLOTS = 4;
 
 export interface PaintSettings {
   layerHeight: number;
@@ -24,7 +24,7 @@ export interface PaintSettings {
   exposure: number;
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   Object.assign(node, props);
   node.append(...children);
@@ -401,7 +401,7 @@ function bandLabel(start: number, top: number, lh: number) {
   return `${(start * lh).toFixed(2)}–${(top * lh).toFixed(2)} mm`;
 }
 
-function isLight(hex: string) {
+export function isLight(hex: string) {
   const n = parseInt(hex.slice(1), 16);
   return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255) > 140;
 }

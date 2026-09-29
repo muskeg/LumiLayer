@@ -446,6 +446,43 @@ export function buildPrintMeshes(r: LithoResult, tolerance = 0.02): (Mesh | null
   return out;
 }
 
+export interface VoxelMaterialInput {
+  cols: number;
+  rows: number;
+  /** Layers per tile in `voxels`. */
+  K: number;
+  pixelMm: number;
+  pixelMmY?: number;
+  layerHeight: number;
+  /** Material per voxel at ((row * cols + col) * K + k), 255 = empty. */
+  voxels: Uint8Array;
+  materialCount: number;
+}
+
+/** Filament mosaic: one watertight mesh per material, viewed from the top like buildLayerBandMeshes. */
+export function buildVoxelMeshes(input: VoxelMaterialInput): (Mesh | null)[] {
+  const { cols: W, rows: H, K, pixelMm: px, layerHeight: lh, voxels } = input;
+  const py = input.pixelMmY ?? px;
+  const grid: VoxelGrid = {
+    W, H, K,
+    at: (i, j, k) => {
+      if (i < 0 || j < 0 || k < 0 || i >= W || j >= H || k >= K) return -1;
+      const m = voxels[(j * W + i) * K + k];
+      return m === 255 ? -1 : m;
+    },
+    X: (I) => I * px,
+    Y: (J) => (H - J) * py,
+    Z: (k) => k * lh,
+  };
+  const out: (Mesh | null)[] = [];
+  for (let m = 0; m < input.materialCount; m++) {
+    const b = new MeshBuilder();
+    meshVoxels(grid, m, b);
+    out.push(b.triangleCount > 0 ? b.finish(true) : null);
+  }
+  return out;
+}
+
 export interface LayerBandInput {
   cols: number;
   rows: number;

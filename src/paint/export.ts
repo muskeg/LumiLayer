@@ -1,4 +1,4 @@
-import { buildLayerBandMeshes } from '../mesh';
+import { buildLayerBandMeshes, buildVoxelMeshes } from '../mesh';
 import { write3mfSync, type Part } from '../threemf';
 import type { StackLayer } from './model';
 
@@ -72,5 +72,44 @@ export function buildPaintingParts(input: PaintExportInput): Part[] {
 export function buildPainting3mf(input: PaintExportInput): PaintExportResult {
   const parts = buildPaintingParts(input);
   const bytes = write3mfSync(parts, input.title ?? 'LumiLayer painting');
+  return { bytes, triangles: parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0), parts: parts.length };
+}
+
+/** Input of the mosaic exporter: a voxel grid of loadout slots (also a Web Worker message). */
+export interface MosaicExportInput {
+  kind: 'mosaic';
+  /** Loadout slot per voxel at ((row * cols + col) * K + k), 255 = empty; row 0 = top edge of the image. */
+  voxels: Uint8Array;
+  cols: number;
+  rows: number;
+  K: number;
+  widthMm: number;
+  heightMm: number;
+  layerHeight: number;
+  /** Loadout, slot 0 = ground. */
+  filaments: { name: string; color: string }[];
+  title?: string;
+}
+
+export function buildMosaicParts(input: MosaicExportInput): Part[] {
+  const { cols, rows, K, voxels, filaments } = input;
+  if (voxels.length !== cols * rows * K) throw new Error('Voxel grid size does not match its dimensions.');
+  const meshes = buildVoxelMeshes({
+    cols, rows, K, voxels,
+    pixelMm: input.widthMm / cols,
+    pixelMmY: input.heightMm / rows,
+    layerHeight: input.layerHeight,
+    materialCount: filaments.length,
+  });
+  const parts: Part[] = [];
+  meshes.forEach((mesh, m) => {
+    if (mesh) parts.push({ name: filaments[m].name, color: filaments[m].color, extruder: m + 1, mesh });
+  });
+  return parts;
+}
+
+export function buildMosaic3mf(input: MosaicExportInput): PaintExportResult {
+  const parts = buildMosaicParts(input);
+  const bytes = write3mfSync(parts, input.title ?? 'LumiLayer filament mosaic');
   return { bytes, triangles: parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0), parts: parts.length };
 }

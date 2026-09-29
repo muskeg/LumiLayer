@@ -5,10 +5,11 @@ import { adjust, demoImage, loadImage, panRange, renderFramed, sourceAspect, typ
 import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Solver } from './lithophane';
 import { buildPrintMeshes } from './mesh';
 import { PaintController } from './paint/controller';
+import { MosaicController } from './paint/mosaicController';
 import type { Preview3D, Preview3DInput } from './preview3d';
 import { write3mf, type Part } from './threemf';
 
-type Mode = 'litho' | 'paint';
+type Mode = 'litho' | 'paint' | 'mosaic';
 
 interface Settings {
   mode: Mode;
@@ -37,6 +38,11 @@ interface Settings {
   colorPriority: number;
   colorCellMm: number;
   dither: boolean;
+  tintLayers: number;
+  tileSegments: number;
+  surface: 'stepped' | 'level';
+  minIsland: number;
+  mosaicDither: boolean;
   lightColor: string;
   exposure: number;
 }
@@ -83,14 +89,21 @@ const DEFAULTS: Settings = {
   colorPriority: 1,
   colorCellMm: 0.4,
   dither: true,
+  tintLayers: 8,
+  tileSegments: 3,
+  surface: 'stepped',
+  minIsland: 3,
+  mosaicDither: false,
   lightColor: '#fff4e2',
   exposure: 1,
 };
 
 /** Settings applied when switching mode. */
 const MODE_DEFAULTS: Record<Mode, Partial<Settings>> = {
-  litho: { layerHeight: 0.1, frameThickness: 4, lightColor: '#fff4e2' },
-  paint: { layerHeight: 0.08, frameThickness: 1.2, lightColor: '#ffffff' },
+  litho: { layerHeight: 0.1, frameThickness: 4, lightColor: '#fff4e2', pixelMm: 0.2 },
+  paint: { layerHeight: 0.08, frameThickness: 1.2, lightColor: '#ffffff', pixelMm: 0.2, baseLayers: 6 },
+  // One tile per nozzle width; a 7 × 0.08 mm ground.
+  mosaic: { layerHeight: 0.08, frameThickness: 1.2, lightColor: '#ffffff', pixelMm: 0.4, baseLayers: 7 },
 };
 
 const LITHO_PRESETS: Record<string, Filament[]> = {
@@ -147,12 +160,15 @@ paint = new PaintController(
   glCanvas,
   () => {
     if (!paint) return;
+    // The mosaic shares the filament profiles: re-solve when they change.
+    if (settings.mode === 'mosaic') return schedule();
     updateInfo();
     dirty3d = true;
     if (view === '3d') update3d();
   },
   (s) => setStatus(s),
 );
+const mosaic = new MosaicController(() => paint!.profiles, () => schedule(), (s) => setStatus(s));
 
 const SECTIONS: Section[] = [
   {
@@ -166,8 +182,9 @@ const SECTIONS: Section[] = [
         options: [
           ['litho', 'Lithophane (backlit)'],
           ['paint', 'Filament painting (front-lit)'],
+          ['mosaic', 'Filament mosaic (front-lit)'],
         ],
-        hint: 'Backlit lithophane, or a HueForge-style filament painting: height from brightness, one filament per height band',
+        hint: 'Backlit lithophane; layered filament painting (one filament per height band); or filament mosaic, where every nozzle-wide tile gets its own short filament combo for a much wider color range',
       },
     ],
   },
@@ -217,7 +234,7 @@ const SECTIONS: Section[] = [
     controls: [
       { type: 'number', key: 'minThickness', label: 'Min body', min: 0.2, max: 5, step: 0.05, unit: 'mm', hint: 'Body thickness for highlights', modes: ['litho'] },
       { type: 'number', key: 'maxThickness', label: 'Max body', min: 0.6, max: 10, step: 0.1, unit: 'mm', hint: 'Body thickness for shadows', modes: ['litho'] },
-      { type: 'range', key: 'baseLayers', label: 'Min height', min: 1, max: 40, step: 1, hint: 'Height of the lowest pixels, in layers (the base plate)', modes: ['paint'] },
+      { type: 'range', key: 'baseLayers', label: 'Min height', min: 1, max: 40, step: 1, hint: 'Height of the lowest pixels, in layers (the ground plate)', modes: ['paint', 'mosaic'] },
       {
         type: 'select',
         key: 'heightMode',
@@ -226,7 +243,7 @@ const SECTIONS: Section[] = [
           ['match', 'Best color match'],
           ['luminance', 'From brightness'],
         ],
-        hint: 'Best color match: each pixel gets the height whose printed color is closest to it. From brightness: classic HueForge-style heightmap',
+        hint: 'Best color match: each pixel gets the height whose printed color is closest to it. From brightness: brighter pixels print taller (a plain heightmap)',
         modes: ['paint'],
       },
       { type: 'checkbox', key: 'invert', label: 'Invert heights', hint: 'Brightness mode: make dark pixels tall instead of bright ones', modes: ['paint'] },
@@ -248,7 +265,20 @@ const SECTIONS: Section[] = [
     extra: buildLithoFilaments,
   },
   { title: 'Layer stack', open: true, modes: ['paint'], controls: [], extra: () => paint!.buildStackPanel() },
-  { title: 'Filaments', open: true, modes: ['paint'], controls: [], extra: () => paint!.buildFilamentPanel() },
+  {
+    title: 'Filament mosaic',
+    open: true,
+    modes: ['mosaic'],
+    controls: [
+      { type: 'range', key: 'tintLayers', label: 'Tint layers', min: 2, max: 16, step: 1, hint: 'Layers above the ground that tiles can use for tinting. More = more colors, slower to compute' },
+      { type: 'range', key: 'tileSegments', label: 'Segments', min: 1, max: 4, step: 1, hint: 'Filament segments per tile. 3 is a good default; 4 blends translucent filaments better' },
+      { type: 'select', key: 'surface', label: 'Surface', options: [['stepped', 'Stepped'], ['level', 'Level']], hint: 'Stepped: each tile only as tall as its combo. Level: pad tiles with ground filament to one even top' },
+      { type: 'range', key: 'minIsland', label: 'Min island', min: 0, max: 12, step: 1, hint: 'Same-combo islands smaller than this many tiles merge into a neighbour (tiny dots print badly)' },
+      { type: 'checkbox', key: 'mosaicDither', label: 'Dithering', hint: 'Mix neighbouring tiles to smooth gradients. Creates many single-tile dots' },
+    ],
+    extra: () => mosaic.buildLoadoutPanel(),
+  },
+  { title: 'Filaments', open: true, modes: ['paint', 'mosaic'], controls: [], extra: () => paint!.buildFilamentPanel() },
   {
     title: 'Preview light',
     controls: [
@@ -359,9 +389,10 @@ function applyModeUi() {
   const m = settings.mode;
   for (const [section, elem] of sectionEls) elem.hidden = !!section.modes && !section.modes.includes(m);
   for (const c of SECTIONS.flatMap((s) => s.controls)) if (c.modes) controlRows.get(c.key)!.hidden = !c.modes.includes(m);
-  $('button[data-view="backlit"]').textContent = m === 'paint' ? 'Front-lit' : 'Backlit';
-  $('button[data-view="front"]').textContent = m === 'paint' ? 'Backlit' : 'Unlit (front)';
-  $('#brand-sub').textContent = m === 'paint' ? 'filament painting' : 'multi-color lithophanes';
+  $('button[data-view="backlit"]').textContent = m === 'litho' ? 'Backlit' : 'Front-lit';
+  $('button[data-view="front"]').textContent = m === 'paint' ? 'Backlit' : m === 'mosaic' ? 'Swatches' : 'Unlit (front)';
+  $('#brand-sub').textContent = m === 'paint' ? 'filament painting' : m === 'mosaic' ? 'filament mosaic' : 'multi-color lithophanes';
+  canvas.classList.toggle('crisp', m === 'mosaic');
   showView();
 }
 
@@ -371,7 +402,7 @@ function showView() {
   canvas.hidden = is3d || isPaint;
   glCanvas.hidden = is3d || !isPaint;
   $('#stage3d').hidden = !is3d;
-  $('#light-toggle').hidden = !is3d || isPaint;
+  $('#light-toggle').hidden = !is3d || settings.mode !== 'litho';
   if (isPaint) paint!.setOpticalMode(view === 'front' ? 'backlit' : 'frontlit');
   if (is3d) update3d();
   else draw2d();
@@ -502,6 +533,27 @@ function compute() {
     return;
   }
 
+  if (settings.mode === 'mosaic') {
+    mosaic.setSettings({
+      layerHeight: settings.layerHeight,
+      groundLayers: settings.baseLayers,
+      tintLayers: settings.tintLayers,
+      maxSegments: settings.tileSegments,
+      stepped: settings.surface === 'stepped',
+      dither: settings.mosaicDither,
+      minIsland: settings.minIsland,
+      frameThickness: settings.frameThickness,
+      light: settings.lightColor,
+      exposure: settings.exposure,
+    });
+    mosaic.setImage(srgb, cols, rows, border, px);
+    draw2d();
+    dirty3d = true;
+    if (view === '3d') update3d();
+    updateInfo();
+    return;
+  }
+
   const lp = lithoParams(px);
   const key = JSON.stringify([lp.colorLayers, lp.layerHeight, lp.minThickness, lp.maxThickness, lp.colorPriority, lp.filaments]);
   if (!solver || key !== solverKey) {
@@ -522,7 +574,9 @@ function compute() {
 }
 
 function draw2d() {
-  if (settings.mode !== 'litho' || !result || view === '3d') return;
+  if (view === '3d') return;
+  if (settings.mode === 'mosaic') return mosaic.draw(canvas, view === 'front' ? 'swatches' : 'predicted');
+  if (settings.mode !== 'litho' || !result) return;
   canvas.width = result.cols;
   canvas.height = result.rows;
   canvas.getContext('2d')!.drawImage(view === 'backlit' ? simCanvas : frontCanvas, 0, 0);
@@ -546,6 +600,12 @@ function update3d() {
       if (!snap) return;
       const base = p.stack()[0]?.colorHex ?? '#ffffff';
       input = { frontLit: true, hf: { ...p.size, pixelMm: lastPx, body: p.heights() }, slab: 0, baseColor: base };
+      sim = front = snap;
+    } else if (settings.mode === 'mosaic') {
+      const snap = mosaic.snapshot();
+      if (!snap) return;
+      const base = mosaic.result!.set.filaments[0]?.color ?? '#ffffff';
+      input = { frontLit: true, hf: { ...mosaic.size, pixelMm: lastPx, body: mosaic.heights() }, slab: 0, baseColor: base };
       sim = front = snap;
     } else {
       if (!result) return;
@@ -572,6 +632,11 @@ function setInfo(headline: string, details: string, hint: string) {
 function updateInfo() {
   const px = lastPx;
   const lh = settings.layerHeight;
+  if (settings.mode === 'mosaic') {
+    const info = mosaic.info();
+    if (info) setInfo(...info);
+    return;
+  }
   if (settings.mode === 'paint') {
     const p = paint!;
     const { cols, rows } = p.size;
@@ -600,7 +665,9 @@ function updateInfo() {
 }
 
 function setStatus(s: string) {
-  $('#status').textContent = s;
+  const el = $('#status');
+  el.textContent = s;
+  el.title = s;
 }
 
 function setupViewer() {
@@ -721,7 +788,7 @@ async function exportLitho() {
 
 async function exportPainting() {
   setStatus('Building 3MF in the background…');
-  const r = await paint!.exportModel(sourceName);
+  const r = await (settings.mode === 'mosaic' ? mosaic.exportModel(sourceName) : paint!.exportModel(sourceName));
   setStatus(`Exported ${r.parts} parts · ${(r.triangles / 1e6).toFixed(2)} M triangles · ${(r.bytes / 1e6).toFixed(1)} MB`);
 }
 
@@ -730,7 +797,7 @@ function setupExport() {
   btn.onclick = async () => {
     btn.disabled = true;
     try {
-      await (settings.mode === 'paint' ? exportPainting() : exportLitho());
+      await (settings.mode === 'litho' ? exportLitho() : exportPainting());
     } catch (e) {
       console.error(e);
       setStatus(`Export failed: ${(e as Error).message}`);

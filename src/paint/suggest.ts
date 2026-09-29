@@ -33,7 +33,7 @@ const HEIGHT_OPTIONS = [24, 32, 40];
 /** Dominant image colors used for scoring in color-match mode. */
 const MAX_CLUSTERS = 256;
 
-interface Samples {
+export interface Samples {
   /** Chroma-weighted Oklab per sample. */
   lab: Float32Array;
   weight: Float32Array;
@@ -42,7 +42,7 @@ interface Samples {
 }
 
 /** Dominant colors (16 levels per channel) with their share of the image. */
-function sampleImage(srgb: Float32Array, invert: boolean): Samples {
+export function sampleImage(srgb: Float32Array, invert: boolean): Samples {
   const Q = 16;
   const n = srgb.length / 3;
   const acc = new Float64Array(Q * Q * Q * 4);
