@@ -40,6 +40,8 @@ export function linearToOklab(r: number, g: number, b: number, out: Float32Array
   out[o + 2] = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
 }
 
+/** Smallest TD (mm) any optical model uses, so extinction stays finite. */
+export const TD_FLOOR = 0.05;
 const SCATTER = Math.LN10;
 const CHROMA_GAIN = 4;
 
@@ -48,8 +50,8 @@ const CHROMA_GAIN = 4;
  * Scattering attenuates all channels equally (10% left at TD); the hue adds
  * extra absorption in the channels the filament color lacks.
  */
-export function absorption(f: Filament): RGB {
-  const td = Math.max(0.05, f.td);
+export function absorption(f: Pick<Filament, 'color' | 'td'>): RGB {
+  const td = Math.max(TD_FLOOR, f.td);
   return hexToRgb(f.color).map(
     (c) => (SCATTER + CHROMA_GAIN * -Math.log(Math.max(srgbToLinear(c), 0.005))) / td,
   ) as RGB;

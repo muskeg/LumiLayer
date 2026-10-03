@@ -1,5 +1,6 @@
+import { absorption, hexToRgb, srgbToLinear, TD_FLOOR } from '../color';
 import { MAX_BANDS, type StackLayer } from './model';
-import { CHROMA_WEIGHT, type HeightMode } from './optics';
+import { CHROMA_WEIGHT, K_TD, MATCH_TIE, type HeightMode } from './optics';
 
 export const VERTEX_SHADER = /* glsl */ `#version 300 es
 out vec2 v_uv;
@@ -22,6 +23,7 @@ uniform int u_layerCount;
 uniform vec2 u_layerHeights[MAX_LAYERS];    // (startZ, endZ) in mm, bottom to top
 uniform vec3 u_filamentColors[MAX_LAYERS];  // sRGB, 0..1
 uniform float u_filamentTD[MAX_LAYERS];     // transmission distance, mm
+uniform vec3 u_filamentAbs[MAX_LAYERS];     // backlit extinction per channel (1/mm), from absorption()
 uniform float u_layerHeight;                // mm
 uniform float u_minLayers;                  // lowest printable height, in layers
 uniform float u_maxLayers;                  // highest printable height (top of the stack), in layers
@@ -35,7 +37,10 @@ uniform vec3 u_light;                       // linear light colour * exposure
 in vec2 v_uv;
 out vec4 outColor;
 
-const float K_TD = 2.995732273553991;       // -ln(0.05): 5% of the light remains after one TD
+// Same constants as the CPU model in optics.ts.
+const float K_TD = ${K_TD.toPrecision(16)};
+const float TD_FLOOR = ${TD_FLOOR.toPrecision(16)};
+const float MATCH_TIE = ${MATCH_TIE.toPrecision(16)};
 
 vec3 toLinear(vec3 c) {
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
@@ -70,13 +75,13 @@ float matchLayers(vec3 srgb) {
     float s = floor(u_layerHeights[i].x / u_layerHeight + 0.5);
     float e = floor(u_layerHeights[i].y / u_layerHeight + 0.5);
     vec3 col = toLinear(u_filamentColors[i]);
-    float k = K_TD / max(u_filamentTD[i], 1e-3) * u_layerHeight;
+    float k = K_TD / max(u_filamentTD[i], TD_FLOOR) * u_layerHeight;
     // Height s belongs to the band below; scan (s, e] within the printable range.
     for (float h = max(s + 1.0, u_minLayers); h <= min(e, u_maxLayers); h += 1.0) {
       vec3 lab = toOklab(mix(col, below, exp(-k * (h - s)))) * vec3(1.0, cw, cw);
       vec3 d = lab - target;
       float err = dot(d, d);
-      if (err < bestErr) {
+      if (err < bestErr - MATCH_TIE) {
         bestErr = err;
         best = h;
       }
@@ -107,15 +112,14 @@ void main() {
     if (i >= u_layerCount) break;
     float d = max(0.0, min(z, u_layerHeights[i].y) - u_layerHeights[i].x);
     if (d <= 0.0) continue;
-    vec3 color = u_filamentColors[i];
-    float k = K_TD / max(u_filamentTD[i], 1e-3);
     if (u_mode == 0) {
-      // Beer-Lambert extinction per channel: alpha = -ln(0.05) / TD * (1 - color).
-      c *= exp(-k * (1.0 - color) * d);
+      // Beer-Lambert transmission with the lithophane's per-channel extinction.
+      c *= exp(-u_filamentAbs[i] * d);
     } else {
       // Reflection: the layer hides what is below by Beer-Lambert (5% shows through at d = TD)
       // and scatters back its own colour.
-      c = mix(toLinear(color), c, exp(-k * d));
+      float k = K_TD / max(u_filamentTD[i], TD_FLOOR);
+      c = mix(toLinear(u_filamentColors[i]), c, exp(-k * d));
     }
   }
   outColor = vec4(toSrgb(c * u_light), 1.0);
@@ -136,19 +140,13 @@ export interface PreviewParams {
 }
 
 const UNIFORMS = [
-  'u_image', 'u_layerCount', 'u_layerHeights', 'u_filamentColors', 'u_filamentTD',
+  'u_image', 'u_layerCount', 'u_layerHeights', 'u_filamentColors', 'u_filamentTD', 'u_filamentAbs',
   'u_layerHeight', 'u_minLayers', 'u_maxLayers', 'u_frameLayers', 'u_mode', 'u_light',
   'u_heightMode', 'u_chromaWeight', 'u_output',
 ] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 const BACKGROUND = [0x0b / 255, 0x0c / 255, 0x0f / 255];
-
-const hexToRgb = (hex: string): [number, number, number] => {
-  const n = parseInt(hex.slice(1, 7), 16) || 0;
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
-};
-const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 
 interface GlState {
   gl: WebGL2RenderingContext;
@@ -172,6 +170,7 @@ export class PaintPreview {
   private readonly heights = new Float32Array(MAX_BANDS * 2);
   private readonly colors = new Float32Array(MAX_BANDS * 3);
   private readonly tds = new Float32Array(MAX_BANDS);
+  private readonly abs = new Float32Array(MAX_BANDS * 3);
   private readonly resizeObserver: ResizeObserver;
   error: string | null = null;
 
@@ -371,11 +370,13 @@ export class PaintPreview {
     this.heights.fill(0);
     this.colors.fill(0);
     this.tds.fill(1);
+    this.abs.fill(0);
     this.layers.forEach((l, i) => {
       this.heights[i * 2] = l.startZ;
       this.heights[i * 2 + 1] = l.endZ;
       this.colors.set(hexToRgb(l.colorHex), i * 3);
       this.tds[i] = l.td;
+      this.abs.set(absorption({ color: l.colorHex, td: l.td }), i * 3);
     });
     const light = hexToRgb(p.light).map((c) => srgbToLinear(c) * p.exposure);
 
@@ -388,6 +389,7 @@ export class PaintPreview {
     gl.uniform2fv(loc.u_layerHeights, this.heights);
     gl.uniform3fv(loc.u_filamentColors, this.colors);
     gl.uniform1fv(loc.u_filamentTD, this.tds);
+    gl.uniform3fv(loc.u_filamentAbs, this.abs);
     gl.uniform1f(loc.u_layerHeight, p.layerHeight);
     gl.uniform1f(loc.u_minLayers, p.minLayers);
     gl.uniform1f(loc.u_maxLayers, p.maxLayers);

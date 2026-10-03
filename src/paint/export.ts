@@ -1,4 +1,5 @@
-import { buildLayerBandMeshes, buildVoxelMeshes } from '../mesh';
+import type { LithoGeometry } from '../lithophane';
+import { buildLayerBandMeshes, buildPrintMeshes, buildVoxelMeshes } from '../mesh';
 import { write3mfSync, type Part } from '../threemf';
 import type { StackLayer } from './model';
 
@@ -69,10 +70,14 @@ export function buildPaintingParts(input: PaintExportInput): Part[] {
   return parts;
 }
 
+export const countTriangles = (parts: Part[]) => parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0);
+
+export function packParts(parts: Part[], title: string): PaintExportResult {
+  return { bytes: write3mfSync(parts, title), triangles: countTriangles(parts), parts: parts.length };
+}
+
 export function buildPainting3mf(input: PaintExportInput): PaintExportResult {
-  const parts = buildPaintingParts(input);
-  const bytes = write3mfSync(parts, input.title ?? 'LumiLayer painting');
-  return { bytes, triangles: parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0), parts: parts.length };
+  return packParts(buildPaintingParts(input), input.title ?? 'LumiLayer painting');
 }
 
 /** Input of the mosaic exporter: a voxel grid of loadout slots (also a Web Worker message). */
@@ -109,7 +114,25 @@ export function buildMosaicParts(input: MosaicExportInput): Part[] {
 }
 
 export function buildMosaic3mf(input: MosaicExportInput): PaintExportResult {
-  const parts = buildMosaicParts(input);
-  const bytes = write3mfSync(parts, input.title ?? 'LumiLayer filament mosaic');
-  return { bytes, triangles: parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0), parts: parts.length };
+  return packParts(buildMosaicParts(input), input.title ?? 'LumiLayer filament mosaic');
+}
+
+/** Lithophane export request. Parts are built first; above `confirmAbove` triangles the worker waits for a LithoWriteRequest. */
+export interface LithoExportInput {
+  kind: 'litho';
+  result: LithoGeometry;
+  tolerance: number;
+  confirmAbove: number;
+  title?: string;
+}
+
+export interface LithoWriteRequest {
+  kind: 'litho-write';
+  confirmed: boolean;
+}
+
+export function buildLithoParts(r: LithoGeometry, tolerance: number): Part[] {
+  return buildPrintMeshes(r, tolerance).flatMap((mesh, i) =>
+    mesh ? [{ name: `${i === 0 ? 'Base' : `Color ${i}`} - ${r.filaments[i].name}`, color: r.filaments[i].color, extruder: i + 1, mesh }] : [],
+  );
 }

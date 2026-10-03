@@ -1,10 +1,12 @@
-import { linearToOklab, srgbToLinear, hexToRgb } from '../color';
+import { linearToOklab, srgbToLinear, hexToRgb, TD_FLOOR } from '../color';
 import type { StackLayer } from './model';
 
 /** -ln(0.05): after one TD of thickness, 5% of what is below still shows through. */
 export const K_TD = -Math.log(0.05);
 /** Hue/chroma error counts this much more than lightness error when matching colors. */
 export const CHROMA_WEIGHT = 2;
+/** Match errors closer than this are ties and go to the lower height, so float noise can't pick between equal colors. */
+export const MATCH_TIE = 1e-6;
 
 export type HeightMode = 'match' | 'luminance';
 
@@ -19,7 +21,7 @@ export interface BandOptics {
 export function bandOptics(stack: StackLayer[], layerHeight: number): BandOptics[] {
   return stack.map((s) => ({
     lin: hexToRgb(s.colorHex).map(srgbToLinear),
-    k: K_TD / Math.max(0.05, s.td),
+    k: K_TD / Math.max(TD_FLOOR, s.td),
     start: Math.round(s.startZ / layerHeight),
     end: Math.round(s.endZ / layerHeight),
   }));
@@ -65,7 +67,7 @@ export function bestLayer(path: Float32Array, minL: number, l: number, a: number
   for (let i = 0; i < path.length / 3; i++) {
     const dl = path[i * 3] - l, da = path[i * 3 + 1] - a, db = path[i * 3 + 2] - b;
     const e = dl * dl + da * da + db * db;
-    if (e < bestErr) {
+    if (e < bestErr - MATCH_TIE) {
       bestErr = e;
       best = i;
     }

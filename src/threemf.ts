@@ -1,4 +1,4 @@
-import { strToU8, zip, zipSync, type Zippable } from 'fflate';
+import { strToU8, zipSync, type Zippable } from 'fflate';
 import type { Mesh } from './mesh';
 
 export interface Part {
@@ -101,14 +101,7 @@ function packageFiles(parts: Part[], title?: string): Zippable {
   };
 }
 
-export function write3mf(parts: Part[], title?: string): Promise<Uint8Array> {
-  const files = packageFiles(parts, title);
-  return new Promise((resolve, reject) =>
-    zip(files, { level: 6 }, (err, data) => (err ? reject(err) : resolve(data))),
-  );
-}
-
-/** Synchronous variant for use inside a Web Worker (no nested workers). */
+/** Runs inside the export worker; fflate's async zip would spawn blob: workers, which the CSP forbids. */
 export function write3mfSync(parts: Part[], title?: string): Uint8Array {
   return zipSync(packageFiles(parts, title), { level: 6 });
 }

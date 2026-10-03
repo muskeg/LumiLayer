@@ -137,6 +137,15 @@ summary {
   justify-self: start;
 }
 
+/* Rows without a value readout give the control the full width. */
+.row:has(> output:empty) {
+  grid-template-columns: 110px 1fr;
+}
+
+.row > output:empty {
+  display: none;
+}
+
 input,
 select {
   font: inherit;
@@ -381,17 +390,52 @@ footer {
   line-height: 1.5;
 }
 
+/* Narrow screens: preview on top, controls below, and the page scrolls as a whole. */
 @media (max-width: 800px) {
+  html,
+  body {
+    height: auto;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  header .button,
+  header button {
+    white-space: nowrap;
+  }
   main {
-    flex-direction: column-reverse;
+    flex-direction: column;
+  }
+  #viewer {
+    order: -1;
+    flex: none;
+    height: 65vh;
+    min-height: 340px;
   }
   aside {
     width: 100%;
-    max-height: 45vh;
+    overflow: visible;
     border-right: 0;
     border-top: 1px solid var(--line);
   }
-  #viewer {
-    min-height: 55vh;
+  .tabs {
+    flex-wrap: wrap;
+  }
+  #status {
+    flex-basis: 100%;
+    order: 1;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 520px) {
+  .tagline {
+    display: none;
+  }
+  header {
+    padding: 8px 10px;
+    gap: 8px;
   }
 }

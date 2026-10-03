@@ -3,21 +3,21 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { buildSolver, solve, type LithoParams } from './lithophane';
 import { buildPrintMeshes, type Mesh } from './mesh';
 import { buildPainting3mf, buildPaintingParts, materialOfLayers, type PaintExportInput } from './paint/export';
-import { DEFAULT_PROFILES, FRAME_SENTINEL, layersFromLuminance, normalizeStack, resolveStack, type Band, type FilamentProfile } from './paint/model';
+import { DEFAULT_PROFILES, FRAME_SENTINEL, layersFromLuminance, normalizeStack, resolveStack, type Band, type FilamentProfile, type StackLayer } from './paint/model';
 import { suggestStack } from './paint/suggest';
-import { bandOptics, bestLayer, pathLabs, targetLab } from './paint/optics';
-import { write3mf } from './threemf';
+import { bandOptics, bestLayer, CHROMA_WEIGHT, K_TD, MATCH_TIE, pathLabs, targetLab } from './paint/optics';
+import { write3mfSync } from './threemf';
 import { filamentOptics, stackOn, TD_CONTRAST } from './paint/km';
 import {
   buildCombos, mosaicStats, mosaicVoxels, EMPTY, KdTree, loadoutOptics, combosFromList, mergeIslands, solveMosaic,
   type MosaicFilament, type ComboConfig,
 } from './paint/mosaic';
-import { buildMosaicParts, type MosaicExportInput } from './paint/export';
+import { buildLithoParts, buildMosaicParts, type MosaicExportInput } from './paint/export';
 import { swatchPlate, swatchRows } from './paint/swatches';
 import { defaultLoadout, normalizeLoadout } from './paint/model';
 import { gamutError, pickLoadout } from './paint/loadout';
 import { sampleImage } from './paint/suggest';
-import { srgbToLinear } from './color';
+import { hexToRgb, linearToOklab, srgbToLinear, TD_FLOOR } from './color';
 
 const params = (over: Partial<LithoParams> = {}): LithoParams => ({
   pixelMm: 0.5,
@@ -272,6 +272,58 @@ describe('stack suggestion', () => {
     expect(white).toBeGreaterThan(18);
   });
 
+  /** Port of matchLayers() in the preview shader (paint/preview.ts), statement for statement. */
+  function shaderMatchLayers(stack: StackLayer[], lh: number, minL: number, maxL: number, srgb: number[]) {
+    const cw = Math.sqrt(CHROMA_WEIGHT);
+    const lab = (c: number[]) => {
+      const o = [0, 0, 0];
+      linearToOklab(c[0], c[1], c[2], o);
+      return [o[0], o[1] * cw, o[2] * cw];
+    };
+    const target = lab(srgb.map(srgbToLinear));
+    let best = minL, bestErr = 1e9;
+    let below = [0, 0, 0];
+    for (const l of stack) {
+      const s = Math.floor(l.startZ / lh + 0.5), e = Math.floor(l.endZ / lh + 0.5);
+      const col = hexToRgb(l.colorHex).map(srgbToLinear);
+      const k = (K_TD / Math.max(l.td, TD_FLOOR)) * lh;
+      const mix = (t: number) => col.map((c, ch) => c + (below[ch] - c) * t);
+      for (let h = Math.max(s + 1, minL); h <= Math.min(e, maxL); h++) {
+        const d = lab(mix(Math.exp(-k * (h - s)))).map((v, ch) => v - target[ch]);
+        const err = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        if (err < bestErr - MATCH_TIE) {
+          bestErr = err;
+          best = h;
+        }
+      }
+      below = mix(Math.exp(-k * (e - s)));
+    }
+    return best;
+  }
+
+  it('CPU height matching picks the same layer as the preview shader', () => {
+    const lh = 0.08;
+    // Includes a TD below TD_FLOOR so both paths must clamp it the same way.
+    const profiles = [...DEFAULT_PROFILES, { id: 'thin', name: 'Thin', color: '#2040c0', td: 0.01 }];
+    let s = 7;
+    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    for (let trial = 0; trial < 12; trial++) {
+      const bands: Band[] = [];
+      let top = 0;
+      for (let b = 0; b < 2 + (trial % 4); b++) bands.push({ filamentId: profiles[Math.floor(rnd() * profiles.length)].id, top: (top += 1 + Math.floor(rnd() * 8)) });
+      const stack = resolveStack(normalizeStack(bands, profiles), profiles, lh);
+      const maxL = Math.round(stack[stack.length - 1].endZ / lh);
+      const minL = 1 + (trial % 3);
+      const path = pathLabs(bandOptics(stack, lh), lh, minL, maxL);
+      for (let p = 0; p < 40; p++) {
+        const px = [rnd(), rnd(), rnd()];
+        const t = [0, 0, 0];
+        targetLab(px[0], px[1], px[2], t);
+        expect(bestLayer(path, minL, t[0], t[1], t[2])).toBe(shaderMatchLayers(stack, lh, minL, maxL, px));
+      }
+    }
+  });
+
   it('respects a smaller slot budget and only uses given profiles', async () => {
     const profiles = DEFAULT_PROFILES.filter((p) => ['black', 'white', 'blue'].includes(p.id));
     const { bands } = await suggestStack({ ...base, profiles, maxFilaments: 2, srgb: image(90) });
@@ -287,13 +339,11 @@ describe('stack suggestion', () => {
 });
 
 describe('3mf', () => {
-  it('writes a package with one component per part', async () => {
+  it('writes a package with one component per part', () => {
     const r = run(randomImage(6, 6), 6, 6);
-    const meshes = buildPrintMeshes(r);
-    const parts = meshes.flatMap((m, i) =>
-      m ? [{ name: r.filaments[i].name, color: r.filaments[i].color, extruder: i + 1, mesh: m }] : [],
-    );
-    const files = unzipSync(await write3mf(parts));
+    const parts = buildLithoParts(r, 0.02);
+    expect(parts[0].name).toBe('Base - White');
+    const files = unzipSync(write3mfSync(parts));
     expect(Object.keys(files).sort()).toEqual(
       ['3D/3dmodel.model', 'Metadata/model_settings.config', '[Content_Types].xml', '_rels/.rels'].sort(),
     );

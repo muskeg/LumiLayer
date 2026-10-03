@@ -51,6 +51,9 @@ export interface LithoResult {
   filaments: Filament[];
 }
 
+/** What the mesher needs from a LithoResult (without the preview rasters). */
+export type LithoGeometry = Omit<LithoResult, 'sim' | 'front'>;
+
 const BINS = 32;
 
 export function colorSlabThickness(p: Pick<LithoParams, 'colorLayers' | 'layerHeight'>) {

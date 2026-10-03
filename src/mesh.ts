@@ -1,4 +1,4 @@
-import type { LithoResult } from './lithophane';
+import type { LithoGeometry } from './lithophane';
 
 export interface Mesh {
   positions: Float32Array;
@@ -63,7 +63,7 @@ export class MeshBuilder {
  */
 
 /** Litho color slab: material of each voxel (0 = base filler, 1..3 = color filament), N layers per column. */
-export function slabMaterials(r: LithoResult): Uint8Array {
+export function slabMaterials(r: LithoGeometry): Uint8Array {
   const n = r.colorLayers;
   const total = r.cols * r.rows;
   const mat = new Uint8Array(total * n);
@@ -415,7 +415,7 @@ export function meshVoxels(
 }
 
 /** Lithophane: one watertight mesh per filament (slab voxels; the base merges slab filler with the body). */
-export function buildPrintMeshes(r: LithoResult, tolerance = 0.02): (Mesh | null)[] {
+export function buildPrintMeshes(r: LithoGeometry, tolerance = 0.02): (Mesh | null)[] {
   const { cols: W, rows: H, colorLayers: N, pixelMm: px, layerHeight: lh } = r;
   const mat = slabMaterials(r);
   const grid: VoxelGrid = {

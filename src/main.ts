@@ -3,11 +3,10 @@ import type { Filament } from './color';
 import { exportFileName, triggerDownload } from './download';
 import { adjust, demoImage, loadImage, panRange, renderFramed, sourceAspect, type Source } from './imaging';
 import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Solver } from './lithophane';
-import { buildPrintMeshes } from './mesh';
 import { PaintController } from './paint/controller';
 import { MosaicController } from './paint/mosaicController';
+import type { LithoWorkerResponse, WorkerRequest, WorkerResponse } from './paint/threeMfWorker';
 import type { Preview3D, Preview3DInput } from './preview3d';
-import { write3mf, type Part } from './threemf';
 
 type Mode = 'litho' | 'paint' | 'mosaic';
 
@@ -757,33 +756,40 @@ function setupFileInput() {
   });
 }
 
+let lithoWorker: Worker | null = null;
+
 async function exportLitho() {
   const HEAVY_TRIANGLES = 3_000_000;
   if (!result) return;
-  const tick = () => new Promise((r) => setTimeout(r, 20));
+  const worker = (lithoWorker ??= new Worker(new URL('./paint/threeMfWorker.ts', import.meta.url), { type: 'module' }));
+  const send = <T>(msg: WorkerRequest) =>
+    new Promise<T>((resolve, reject) => {
+      worker.onmessage = (e: MessageEvent<T>) => resolve(e.data);
+      worker.onerror = (e) => reject(new Error(e.message || 'Export worker failed'));
+      worker.postMessage(msg);
+    });
   setStatus('Building meshes…');
-  await tick();
-  const r = result;
-  const meshes = buildPrintMeshes(r, settings.meshTolerance);
-  const parts: Part[] = meshes.flatMap((mesh, i) =>
-    mesh ? [{ name: `${i === 0 ? 'Base' : `Color ${i}`} - ${r.filaments[i].name}`, color: r.filaments[i].color, extruder: i + 1, mesh }] : [],
-  );
-  const tris = parts.reduce((n, p) => n + p.mesh.indices.length / 3, 0);
-  if (
-    tris > HEAVY_TRIANGLES &&
-    !confirm(
-      `This model has ${(tris / 1e6).toFixed(1)} M triangles. Slicers may take very long or appear stuck.\n\n` +
-        'To lighten it: raise Color cell, raise Simplify, increase Pixel size or turn off Dithering.\n\nExport anyway?',
-    )
-  ) {
-    setStatus('Export cancelled');
-    return;
-  }
-  setStatus(`Writing 3MF (${(tris / 1e6).toFixed(2)} M triangles)…`);
-  await tick();
-  const data = await write3mf(parts);
-  triggerDownload(new Blob([data as Uint8Array<ArrayBuffer>], { type: 'model/3mf' }), exportFileName(sourceName, 'lithophane'));
-  setStatus(`Exported ${parts.length} parts · ${(tris / 1e6).toFixed(2)} M triangles · ${(data.length / 1e6).toFixed(1)} MB`);
+  // The preview rasters stay here; the worker only needs the geometry.
+  const { sim: _sim, front: _front, ...geometry } = result;
+  const built = await send<LithoWorkerResponse>({ kind: 'litho', result: geometry, tolerance: settings.meshTolerance, confirmAbove: HEAVY_TRIANGLES });
+  let res: WorkerResponse;
+  if ('confirm' in built) {
+    if (
+      !confirm(
+        `This model has ${(built.triangles / 1e6).toFixed(1)} M triangles. Slicers may take very long or appear stuck.\n\n` +
+          'To lighten it: raise Color cell, raise Simplify, increase Pixel size or turn off Dithering.\n\nExport anyway?',
+      )
+    ) {
+      worker.postMessage({ kind: 'litho-write', confirmed: false } satisfies WorkerRequest);
+      setStatus('Export cancelled');
+      return;
+    }
+    setStatus(`Writing 3MF (${(built.triangles / 1e6).toFixed(2)} M triangles)…`);
+    res = await send<WorkerResponse>({ kind: 'litho-write', confirmed: true });
+  } else res = built;
+  if (!res.ok) throw new Error(res.error);
+  triggerDownload(new Blob([res.bytes], { type: 'model/3mf' }), exportFileName(sourceName, 'lithophane'));
+  setStatus(`Exported ${res.parts} parts · ${(res.triangles / 1e6).toFixed(2)} M triangles · ${(res.bytes.byteLength / 1e6).toFixed(1)} MB`);
 }
 
 async function exportPainting() {
