@@ -1,8 +1,10 @@
+import '@fontsource-variable/inter';
 import './style.css';
 import type { Filament } from './color';
 import { buildControlPanel, type ControlPanel } from './controls';
 import { exportFileName, triggerDownload } from './download';
 import { attachFraming } from './framing';
+import { watchRangeFills } from './rangeFill';
 import { adjust, demoImage, loadImage, panRange, renderFramed, sourceAspect, type Source } from './imaging';
 import { buildLithoFilaments } from './lithoFilaments';
 import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Solver } from './lithophane';
@@ -50,7 +52,11 @@ paint = new PaintController(
 const mosaic = new MosaicController(() => paint!.profiles, () => schedule(), (s) => setStatus(s));
 
 let panel: ControlPanel;
-const syncControls = () => panel.sync();
+let refreshRangeFills = () => {};
+const syncControls = () => {
+  panel.sync();
+  refreshRangeFills();
+};
 
 function onModeChange() {
   Object.assign(settings, MODE_DEFAULTS[settings.mode]);
@@ -64,7 +70,7 @@ function applyModeUi() {
   $('button[data-view="main"]').textContent = VIEW_LABELS[m].main;
   $('button[data-view="alt"]').textContent = VIEW_LABELS[m].alt;
   if (m !== 'litho') paint!.setTdHelp(m);
-  $('#brand-sub').textContent = m === 'paint' ? 'filament painting' : m === 'mosaic' ? 'filament mosaic' : 'multi-color lithophanes';
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#mode-switch button')) b.setAttribute('aria-pressed', String(b.dataset.mode === m));
   canvas.classList.toggle('crisp', m === 'mosaic');
   showView();
 }
@@ -228,14 +234,19 @@ function update3d() {
   }, 60);
 }
 
-/** Info bar, built with textContent (filament names are user input). */
+/** Info bar as stat chips, built with textContent (filament names are user input). */
 function setInfo(headline: string, details: string, hint: string) {
-  const b = document.createElement('b');
-  b.textContent = headline;
+  const chip = (text: string, strong = false) => {
+    const c = document.createElement(strong ? 'b' : 'span');
+    c.className = 'stat';
+    c.textContent = text;
+    return c;
+  };
   const h = document.createElement('span');
   h.className = 'hint';
   h.textContent = hint;
-  $('#info').replaceChildren(b, ` · ${details}`, document.createElement('br'), h);
+  h.title = hint;
+  $('#info').replaceChildren(chip(headline, true), ...details.split(' · ').map((d) => chip(d)), h);
 }
 
 function updateInfo() {
@@ -280,6 +291,13 @@ function setStatus(s: string) {
 }
 
 function setupViewer() {
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#mode-switch button'))
+    b.onclick = () => {
+      if (settings.mode === b.dataset.mode) return;
+      settings.mode = b.dataset.mode as Settings['mode'];
+      onModeChange();
+      schedule();
+    };
   document.querySelectorAll<HTMLButtonElement>('.tabs button').forEach((btn) => {
     btn.onclick = () => {
       document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b === btn));
@@ -391,6 +409,7 @@ panel = buildControlPanel(
     schedule();
   },
 );
+refreshRangeFills = watchRangeFills($('#controls'));
 syncControls();
 applyModeUi();
 setupViewer();

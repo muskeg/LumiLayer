@@ -34,7 +34,7 @@ export class Preview3D {
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
-    this.scene.background = new THREE.Color('#15171c');
+    this.scene.background = new THREE.Color('#100f0e');
     this.scene.add(new THREE.HemisphereLight('#ffffff', '#303040', 1.2));
     const key = new THREE.DirectionalLight('#ffffff', 1.6);
     key.position.set(-1, 1.5, -2);
@@ -135,7 +135,7 @@ export class Preview3D {
     this.faceMat.needsUpdate = true;
     this.bodyMat.map = this.frontLit ? tex : null;
     this.bodyMat.needsUpdate = true;
-    this.scene.background = new THREE.Color(this.backlit && !this.frontLit ? '#0b0c0f' : '#20232a');
+    this.scene.background = new THREE.Color(this.backlit && !this.frontLit ? '#0d0c0b' : '#1a1816');
   }
 
   resize() {

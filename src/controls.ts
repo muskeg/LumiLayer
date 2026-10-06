@@ -8,9 +8,10 @@ export interface ControlPanel {
 }
 
 function fmt(c: Ctl, v: unknown): string {
+  if (c.type === 'number') return c.unit ?? '';
   if (c.type !== 'range') return '';
   const decimals = c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : 2;
-  return `${Number(v).toFixed(decimals)}${c.unit ?? ''}`;
+  return `${Number(v).toFixed(decimals)}${c.unit && c.unit !== '×' ? ` ${c.unit}` : (c.unit ?? '')}`;
 }
 
 /** Builds the settings panel from SECTIONS; `onChange` gets the edited key, or null after a section reset. */

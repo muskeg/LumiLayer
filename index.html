@@ -5,29 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Free, open-source tool that turns a photo into a multi-color lithophane, a layered filament painting or a filament mosaic and exports 3MF." />
     <title>LumiLayer – lithophanes and filament paintings</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23ffe9b0'/><rect x='3' y='3' width='10' height='3' fill='%2300a0e0'/><rect x='3' y='7' width='10' height='3' fill='%23e0007a'/><rect x='3' y='11' width='10' height='2' fill='%23ffe000'/></svg>" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='4' fill='%23161514'/><rect x='3' y='3.5' width='10' height='2.4' rx='1.2' fill='%23f7b955'/><rect x='3' y='6.8' width='8' height='2.4' rx='1.2' fill='%23f7b955' fill-opacity='.6'/><rect x='3' y='10.1' width='6' height='2.4' rx='1.2' fill='%23f7b955' fill-opacity='.3'/></svg>" />
   </head>
   <body>
     <header>
-      <h1>LumiLayer</h1>
-      <span class="tagline" id="brand-sub">multi-color lithophanes</span>
+      <div class="brand">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <h1>LumiLayer</h1>
+      </div>
+      <div class="divider"></div>
+      <div class="seg" id="mode-switch" role="group" aria-label="What are you making?">
+        <button data-mode="litho" title="Backlit lithophane">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="3" /><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1" /></svg>
+          <span class="lbl">Lithophane</span>
+        </button>
+        <button data-mode="paint" title="Layered filament painting (front-lit)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2 12.5h12M3 9.5h10M4.5 6.5h7M6 3.5h4" /></svg>
+          <span class="lbl">Painting</span>
+        </button>
+        <button data-mode="mosaic" title="Filament mosaic (front-lit, per-tile combos)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></svg>
+          <span class="lbl">Mosaic</span>
+        </button>
+      </div>
       <div class="spacer"></div>
-      <label class="button">
-        Open photo
+      <label class="button ghost" title="Open a photo (or drop one anywhere)">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2M8 2.5v8M5 5.5l3-3 3 3" /></svg>
+        <span class="lbl">Open photo</span>
         <input id="file" type="file" accept="image/*" hidden />
       </label>
-      <button id="export" class="primary">Export 3MF</button>
+      <button id="export" class="primary">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2M8 2.5v8M5 7.5l3 3 3-3" /></svg>
+        Export 3MF
+      </button>
     </header>
     <main>
       <aside id="controls"></aside>
       <section id="viewer">
         <nav class="tabs">
-          <button data-view="main" class="active">Backlit</button>
-          <button data-view="alt">Unlit (front)</button>
-          <button data-view="3d">3D</button>
+          <div class="seg sm" role="group" aria-label="View">
+            <button data-view="main" class="active">Backlit</button>
+            <button data-view="alt">Unlit (front)</button>
+            <button data-view="3d">3D</button>
+          </div>
           <label id="light-toggle" hidden><input type="checkbox" checked /> Backlight on</label>
           <div class="spacer"></div>
-          <span id="status"></span>
+          <span id="status" role="status"></span>
         </nav>
         <div id="stage">
           <canvas id="canvas2d" title="Drag to pan, scroll to zoom"></canvas>

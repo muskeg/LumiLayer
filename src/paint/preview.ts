@@ -141,7 +141,8 @@ const UNIFORMS = [
 ] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
-const BACKGROUND = [0x0b / 255, 0x0c / 255, 0x0f / 255];
+// Matches --stage in style.css.
+const BACKGROUND = [0x10 / 255, 0x0f / 255, 0x0e / 255];
 
 interface GlState {
   gl: WebGL2RenderingContext;

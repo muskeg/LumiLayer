@@ -142,23 +142,6 @@ export const DEFAULT_LITHO_PRESET = 'CMY + White';
 
 export const SECTIONS: Section[] = [
   {
-    title: 'Mode',
-    open: true,
-    controls: [
-      {
-        type: 'select',
-        key: 'mode',
-        label: 'Type',
-        options: [
-          ['litho', 'Lithophane (backlit)'],
-          ['paint', 'Filament painting (front-lit)'],
-          ['mosaic', 'Filament mosaic (front-lit)'],
-        ],
-        hint: 'Backlit lithophane; layered filament painting (one filament per height band); or filament mosaic, where every nozzle-wide tile gets its own short filament combo for a much wider color range',
-      },
-    ],
-  },
-  {
     title: 'Framing',
     open: true,
     controls: [
