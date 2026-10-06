@@ -61,7 +61,7 @@ export, and viewer. Natural seams, all mechanical:
 **Benefit:** each concern is independently testable (the framing and settings logic today has
 zero tests because they're entangled with the DOM).
 
-**Effort:** M (pure refactor, no behavior change — protect with the existing 36 tests + a couple
+**Effort:** M (pure refactor, no behavior change — protect with the existing 42 tests + a couple
 of new settings/framing tests).
 
 ---
@@ -81,20 +81,14 @@ hidden dependency; easier to test and to evolve separately.
 
 ---
 
-### I6 — Add the missing tests 🟠
-`core.test.ts` (36 tests) covers the pure core well, but these pure/testable paths have none:
+### I6 — Add the missing tests ✅ done (rev. 3)
+Added: `exportWorker.test.ts` (the real worker module behind a fake `Worker`: direct write,
+confirm → write, cancel leaves nothing pending, grid-cap error), framing geometry
+(`panRange`, `sourceAspect`), suggestion and auto-pick determinism, and a flat-block
+triangle-count guard on the greedy mesher. `runExport` gained an optional `confirmAbove`
+parameter so the confirm path is testable without a 3 M-triangle model.
 
-- `imaging.ts` — `renderFramed` crop/rotate/zoom math (`adjust` desaturation is now tested).
-- `suggest.ts` / `loadout.ts` — invariant tests (e.g. suggested stack is ≤ `AMS_SLOTS` filaments,
-  bands partition the height, auto-pick is deterministic for a fixed image).
-- `mesh.ts` — the three builders already have manifold tests; add a *size/perf* guard (a small
-  case with known triangle count) to catch regressions.
-- `threeMfWorker.ts` — the message protocol, especially the `confirm` → `write`
-  round-trip (today verified only manually in the browser).
-
-**Benefit:** the refactor items (I1–I5) become safe, and regressions are caught.
-
-**Effort:** M.
+Still untested: canvas code (`renderFramed` drawing, 2D previews) — it needs a DOM canvas.
 
 ---
 
@@ -144,11 +138,11 @@ tinting. The panel also says the profiles are shared by both modes. The litho le
 | I9 | 🟡 | Typed worker message protocol | ✅ done |
 | I8 | 🟡 | Audit 3MF streaming for large models | ✅ moot |
 | I11 | 🟠 | CSP in the production build | ✅ done |
-| I6 | 🟠 | Add missing tests (imaging, worker protocol, suggest/loadout invariants) | open |
+| I6 | 🟠 | Add missing tests (worker protocol, framing, determinism, mesh size guard) | ✅ done |
 | I4 | 🟠 | Split `main.ts` | open |
 | I5 | 🟠 | Break `mosaicController → controller` coupling | open |
 | I2 | 🟡 | Alias `MosaicFilament` (no `tdConvention`) | open |
 | I7 | 🟡 | Unify `luma`/`luminance` (fix B3/B4) | ✅ done |
 | I10 | 🟡 | TD-meaning tooltips | ✅ done |
 
-**Suggested order:** I6 first so the P1 refactors (I4, I5) are protected, then I2.
+**Suggested order:** I4 and I5 (now protected by the tests), then I2.

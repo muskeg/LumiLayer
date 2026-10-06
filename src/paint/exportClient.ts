@@ -15,6 +15,7 @@ export async function runExport(
   transfer: Transferable[],
   lighten: string,
   onStatus: (s: string) => void,
+  confirmAbove = HEAVY_TRIANGLES,
 ): Promise<ExportedFile | null> {
   const send = <T>(msg: WorkerRequest, t: Transferable[] = []) =>
     new Promise<T>((resolve, reject) => {
@@ -22,7 +23,7 @@ export async function runExport(
       worker.onerror = (e) => reject(new Error(e.message || 'Export worker failed'));
       worker.postMessage(msg, t);
     });
-  const built = await send<BuildResponse>({ ...request, confirmAbove: HEAVY_TRIANGLES }, transfer);
+  const built = await send<BuildResponse>({ ...request, confirmAbove }, transfer);
   let res: WorkerResponse;
   if ('confirm' in built) {
     const m = (built.triangles / 1e6).toFixed(1);

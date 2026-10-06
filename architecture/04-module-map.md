@@ -98,17 +98,22 @@ belongs to each optical model.
 
 ## 6. Test coverage map
 
-`core.test.ts` (36 tests) exercises the pure core only:
+`core.test.ts` (37 tests) and `exportWorker.test.ts` (5 tests) exercise the non-DOM code:
 
 - solver: enumeration, LUT, `bestCombo`, `targetFor`
-- mesh: manifold closure (edge-pairing + positive signed volume) for the three builders
+- mesh: manifold closure (edge-pairing + positive signed volume) for the three builders; a flat
+  block must mesh to exactly 12 triangles (greedy-merging regression guard)
 - 3MF: package structure (litho via `buildLithoParts` + `write3mfSync`, painting)
 - painting: CPU `pathLabs`/`bestLayer` vs a statement-for-statement port of the shader's
   `matchLayers` (480 random cases, including a TD below `TD_FLOOR`)
 - KM: convergence to filament color, translucent filtering, TD contrast
 - mosaic: combo dedupe, `KdTree` nearest-neighbor vs brute force, island merge
-- model: `layersFromLuminance`, `normalizeStack`, `sanitizeProfile`, loadout auto-pick
+- model: `layersFromLuminance`, `normalizeStack`, `sanitizeProfile`, loadout auto-pick;
+  suggestion and auto-pick are deterministic
+- imaging: `panRange` / `sourceAspect` cover geometry, `adjust` desaturation
+- color: `luma` vs `luminance` domains, `isLight` threshold
+- export protocol (`exportWorker.test.ts`): the real worker module behind a fake `Worker` —
+  direct write, confirm → write, cancel (nothing left pending), grid cap error
 
-**Not covered:** the framing/adjust path (`imaging`), the 2D preview, the worker message
-protocol (incl. the litho confirm round-trip — verified manually in the browser),
-`suggest.ts`/`loadout.ts` end-to-end quality (only invariants). (improvement-plan)
+**Not covered:** canvas/DOM code (`renderFramed`, 2D previews, controllers) and the GLSL
+itself (its port is tested).

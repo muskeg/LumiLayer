@@ -229,10 +229,14 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
 
 ## 7. Testing posture
 
-A single, dense `core.test.ts` (36 tests) covers the riskiest math and geometry: solver
+Two test files, 42 tests. `core.test.ts` covers the riskiest math and geometry: solver
 tone mapping, combo budget, manifold closure and volume conservation across modes and
-filament sets, band→material mapping, 3MF package structure, **CPU vs shader height matching
-(a statement-for-statement port of `matchLayers`)**, KM convergence and TD contrast,
-combo enumeration/dedupe, k-d-tree correctness, island merging, swatch plate, loadout
-normalization, and auto-pick quality. Gaps: no tests for the framing/adjust path, the 2D
-preview rendering, or the worker message protocol (details in the improvement plan).
+filament sets, a flat-block triangle-count guard on the greedy mesher, band→material mapping,
+3MF package structure, **CPU vs shader height matching (a statement-for-statement port of
+`matchLayers`)**, KM convergence and TD contrast, combo enumeration/dedupe, k-d-tree
+correctness, island merging, swatch plate, loadout normalization, auto-pick quality and
+determinism, framing geometry (`panRange`/`sourceAspect`), and the brightness helpers.
+`exportWorker.test.ts` runs the real worker module in-process behind a fake `Worker` and
+covers the export protocol end to end: direct write, confirm → write, cancel, and the grid cap.
+Gaps: the canvas-based parts (`renderFramed`, 2D previews) and the GLSL itself (only its port
+is tested).

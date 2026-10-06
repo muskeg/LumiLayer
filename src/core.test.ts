@@ -18,7 +18,7 @@ import { defaultLoadout, normalizeLoadout } from './paint/model';
 import { gamutError, pickLoadout } from './paint/loadout';
 import { sampleImage } from './paint/suggest';
 import { hexLuma, hexToRgb, linearToOklab, luma, luminance, srgbToLinear, TD_FLOOR } from './color';
-import { adjust } from './imaging';
+import { adjust, panRange, sourceAspect, type Source } from './imaging';
 import { isLight } from './paint/controller';
 
 const params = (over: Partial<LithoParams> = {}): LithoParams => ({
@@ -224,6 +224,14 @@ describe('filament painting', () => {
     expect(() => buildPaintingParts(input)).toThrow(/too large to export/);
   });
 
+  it('meshes a flat block as a plain box (greedy merging guard)', () => {
+    const stack = resolveStack([{ filamentId: 'black', top: 20 }], profiles, lh);
+    const heights = new Float32Array(8 * 6).fill(5 * lh);
+    const parts = buildPaintingParts({ heights, cols: 8, rows: 6, widthMm: 4, heightMm: 3, baseHeight: lh, layerHeight: lh, stack });
+    expect(parts).toHaveLength(1);
+    expect(parts[0].mesh.indices.length / 3).toBe(12);
+  });
+
   it('reads correctly from the top: image column 0 at x = 0', () => {
     // Left column tall enough to reach white, right column stays black.
     const heights = Float32Array.from([16, 3, 16, 3], (l) => l * lh);
@@ -262,6 +270,7 @@ describe('stack suggestion', () => {
     expect(['White', 'Ivory']).toContain(names[names.length - 1]);
     for (let i = 1; i < bands.length; i++) expect(bands[i].top).toBeGreaterThan(bands[i - 1].top);
     expect(bands[bands.length - 1].top).toBeLessThanOrEqual(80);
+    expect((await suggestStack({ ...base, srgb: image(300) })).bands).toEqual(bands);
   });
 
   it('color-match heights put each color at the height that prints it', () => {
@@ -342,6 +351,20 @@ describe('stack suggestion', () => {
     const { bands } = await suggestStack({ ...base, srgb: image(300) });
     const ids = new Set(bands.map((b) => b.filamentId));
     expect(ids.has('white') && ids.has('ivory')).toBe(false);
+  });
+});
+
+describe('framing', () => {
+  const src = { width: 400, height: 200 } as unknown as Source;
+  const f = { zoom: 1, panX: 0, panY: 0, rotation: 0, flip: false };
+
+  it('covers the grid and reports how far the image can pan', () => {
+    expect(sourceAspect(src, 0)).toBe(2);
+    expect(sourceAspect(src, 90)).toBe(0.5);
+    expect(panRange(src, 100, 100, f)).toEqual({ x: 50, y: 0 });
+    expect(panRange(src, 100, 100, { ...f, rotation: 90 })).toEqual({ x: 0, y: 50 });
+    expect(panRange(src, 100, 100, { ...f, zoom: 2 })).toEqual({ x: 150, y: 50 });
+    expect(panRange(src, 200, 100, f)).toEqual({ x: 0, y: 0 });
   });
 });
 
@@ -545,5 +568,7 @@ describe('filament mosaic', () => {
     const def = defaultLoadout(DEFAULT_PROFILES, 4).map((id) => DEFAULT_PROFILES.find((p) => p.id === id)!);
     const defSet = buildCombos(def, loadoutOptics(def, cfg2), cfg2);
     expect(error).toBeLessThanOrEqual(gamutError(defSet, sampleImage(srgb, false), new KdTree(defSet.lab)) * 1.05);
+    const again = await pickLoadout({ srgb, profiles: DEFAULT_PROFILES, slots: 4, config: cfg2 });
+    expect(again.ids).toEqual(ids);
   }, 30_000);
 });
