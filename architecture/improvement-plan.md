@@ -126,12 +126,12 @@ tag; adding `kind: 'paint'` would make the union fully discriminated.
 
 ---
 
-### I10 — Document the TD meanings at the point of use 🟡
-Already covered in `02-color-and-light-models.md` §2; surface a one-line tooltip on each mode's
-TD input (also a B5 fix). A profile TD is now also read by the painting Backlit view (10%
-convention).
-
-**Effort:** S (UX copy).
+### I10 — Document the TD meanings at the point of use ✅ done (rev. 3)
+The shared Filaments panel (painting + mosaic) switches its hint and the TD slider tooltips with
+the mode (`PaintController.setTdHelp`, texts in `TD_HELP`): painting explains the 5% hiding
+reading and that the Backlit view reads ~10% light; mosaic explains the 5% contrast reading and
+tinting. The panel also says the profiles are shared by both modes. The litho legend states the
+~10% light reading.
 
 ---
 
@@ -153,6 +153,6 @@ convention).
 | I5 | 🟠 | Break `mosaicController → controller` coupling | open |
 | I2 | 🟡 | Alias `MosaicFilament` (no `tdConvention`) | open |
 | I7 | 🟡 | Unify `luma`/`luminance` (fix B3/B4) | open |
-| I10 | 🟡 | TD-meaning tooltips | open |
+| I10 | 🟡 | TD-meaning tooltips | ✅ done |
 
-**Suggested order:** I6 first so the P1 refactors (I4, I5) are protected, then I7, I10, I2.
+**Suggested order:** I6 first so the P1 refactors (I4, I5) are protected, then I7, I2.

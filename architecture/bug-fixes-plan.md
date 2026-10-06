@@ -124,8 +124,9 @@ the wrong design: TD is a measured property of the filament; the convention belo
 model.
 
 **Fix:** keep one physical TD per filament and have each model derive its constants from it
-(calibrate `K_TD` and `TD_CONTRAST` so the same measured TD predicts consistent looks). Short
-term: a tooltip on each TD input stating what 1 TD means in that mode.
+(calibrate `K_TD` and `TD_CONTRAST` so the same measured TD predicts consistent looks). The
+short-term part is done (rev. 3): every TD input and the shared Filaments panel say what 1 TD
+means in the active mode (I10).
 
 **Test:** none directly (UX/model change); a visual review is sufficient.
 

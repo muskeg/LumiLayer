@@ -13,6 +13,12 @@ import { suggestStack } from './suggest';
 /** Filament slots of a single AMS unit. */
 export const AMS_SLOTS = 4;
 
+/** What one TD means in each mode's optical model (the profiles, and so the values, are shared). */
+const TD_HELP = {
+  paint: 'after one TD of filament only 5% of the color below still shows (Front-lit view); the Backlit view reads it as ~10% of the light getting through.',
+  mosaic: 'after one TD of filament only 5% of the contrast below still shows, so translucent (high-TD) filaments tint the tiles under them.',
+};
+
 export interface PaintSettings {
   layerHeight: number;
   /** Height of the darkest pixels, in layers. */
@@ -49,6 +55,8 @@ export class PaintController {
   private suggestButton = el('button', { className: 'small accent', textContent: 'Suggest stack for this image' });
   private saveTimer = 0;
   private worker: Worker | null = null;
+  private tdMode: keyof typeof TD_HELP = 'paint';
+  private tdHint = el('p', { className: 'hint' });
 
   constructor(canvas: HTMLCanvasElement, private onChange: () => void, private onStatus: (s: string) => void = () => {}) {
     this.preview = new PaintPreview(canvas);
@@ -246,8 +254,19 @@ export class PaintController {
       this.changed(true);
     };
     this.renderProfiles();
-    return el('div', {}, this.filamentList, el('div', { className: 'button-row' }, add, reset),
-      el('p', { className: 'hint', textContent: 'TD (transmission distance): thickness in mm after which only 5% of light passes. Profiles are saved in this browser.' }));
+    this.setTdHelp(this.tdMode);
+    return el('div', {}, this.filamentList, el('div', { className: 'button-row' }, add, reset), this.tdHint);
+  }
+
+  /** The filament panel is shared by painting and mosaic; explain TD for the active one. */
+  setTdHelp(mode: keyof typeof TD_HELP) {
+    this.tdMode = mode;
+    this.tdHint.textContent = `TD (transmission distance, mm): ${TD_HELP[mode]} Profiles are saved in this browser and shared by painting and mosaic.`;
+    for (const td of this.filamentList.querySelectorAll<HTMLInputElement>('input[type=range]')) td.title = this.tdTitle();
+  }
+
+  private tdTitle() {
+    return `Transmission distance (mm): ${TD_HELP[this.tdMode]}`;
   }
 
   private renderProfiles() {
@@ -255,7 +274,7 @@ export class PaintController {
       ...this.profiles.map((p) => {
         const color = el('input', { type: 'color', value: p.color, title: 'Filament color' });
         const name = el('input', { type: 'text', value: p.name, maxLength: 40, title: 'Filament name' });
-        const td = el('input', { type: 'range', min: String(TD_MIN), max: String(TD_MAX), step: '0.1', value: String(p.td), title: 'Transmission distance (mm)' });
+        const td = el('input', { type: 'range', min: String(TD_MIN), max: String(TD_MAX), step: '0.1', value: String(p.td), title: this.tdTitle() });
         const tdOut = el('output', { textContent: `${p.td.toFixed(1)}mm` });
         const del = el('button', { className: 'icon', textContent: '✕', title: 'Delete filament', disabled: this.profiles.length <= 1 });
         color.oninput = () => { p.color = color.value; this.changed(true); };

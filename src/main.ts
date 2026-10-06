@@ -396,6 +396,7 @@ function applyModeUi() {
   for (const c of SECTIONS.flatMap((s) => s.controls)) if (c.modes) controlRows.get(c.key)!.hidden = !c.modes.includes(m);
   $('button[data-view="main"]').textContent = VIEW_LABELS[m].main;
   $('button[data-view="alt"]').textContent = VIEW_LABELS[m].alt;
+  if (m !== 'litho') paint!.setTdHelp(m);
   $('#brand-sub').textContent = m === 'paint' ? 'filament painting' : m === 'mosaic' ? 'filament mosaic' : 'multi-color lithophanes';
   canvas.classList.toggle('crisp', m === 'mosaic');
   showView();
@@ -462,7 +463,7 @@ function buildLithoFilaments(): HTMLElement {
   };
   const legend = Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: 'Slot 1 is the base (body). Slots 2-4 are stacked color layers. Last field: transmission distance (TD, mm).',
+    textContent: 'Slot 1 is the base (body). Slots 2-4 are stacked color layers. Last field: TD (transmission distance, mm), the thickness at which ~10% of the light gets through.',
   });
   box.appendChild(legend);
   render();
