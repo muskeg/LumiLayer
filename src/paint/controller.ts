@@ -2,7 +2,7 @@ import { luma } from '../color';
 import { exportFileName, triggerDownload } from '../download';
 import type { PaintExportInput } from './export';
 import {
-  DEFAULT_PROFILES, FRAME_SENTINEL, MAX_BANDS, MAX_LAYERS, TD_MAX, TD_MIN,
+  DEFAULT_PROFILES, FRAME_SENTINEL, MAX_BANDS, MAX_LAYERS, MAX_PROFILES, TD_MAX, TD_MIN,
   layersFromLuminance, loadProfiles, loadStack, newProfileId, normalizeStack, resolveStack, saveProfiles, saveStack,
   type Band, type FilamentProfile, type StackLayer,
 } from './model';
@@ -44,6 +44,7 @@ export class PaintController {
   private stackList = el('div', { className: 'stack' });
   private filamentList = el('div', { className: 'profiles' });
   private addBandButton = el('button', { className: 'small', textContent: '+ Add band on top' });
+  private addProfileButton = el('button', { className: 'small', textContent: '+ Add filament' });
   private suggestButton = el('button', { className: 'small accent', textContent: 'Suggest stack for this image' });
   private saveTimer = 0;
   private worker: Worker | null = null;
@@ -232,8 +233,9 @@ export class PaintController {
   // ---- filament manager --------------------------------------------------------------------------
 
   buildFilamentPanel(): HTMLElement {
-    const add = el('button', { className: 'small', textContent: '+ Add filament' });
+    const add = this.addProfileButton;
     add.onclick = () => {
+      if (this.profiles.length >= MAX_PROFILES) return;
       this.profiles.push({ id: newProfileId(this.profiles), name: 'New filament', color: '#888888', td: 1.5 });
       this.renderProfiles();
       this.changed(true);
@@ -262,6 +264,8 @@ export class PaintController {
   }
 
   private renderProfiles() {
+    this.addProfileButton.disabled = this.profiles.length >= MAX_PROFILES;
+    this.addProfileButton.title = this.addProfileButton.disabled ? `At most ${MAX_PROFILES} profiles (Suggest and Auto-pick try every combination)` : '';
     this.filamentList.replaceChildren(
       ...this.profiles.map((p) => {
         const color = el('input', { type: 'color', value: p.color, title: 'Filament color' });

@@ -330,6 +330,7 @@ export class PaintPreview {
     }
     gl.bindTexture(gl.TEXTURE_2D, s.texture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    // 16 B/pixel; MAX_PIXELS (settings.ts) keeps this under ~25 MB of GPU memory.
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cols, rows, 0, gl.RGBA, gl.FLOAT, data);
     this.error = null;
   }

@@ -196,6 +196,21 @@ describe('filament painting', () => {
     const fixed = normalizeStack([{ filamentId: 'missing', top: 5 }, { filamentId: 'red', top: 3 }], profiles);
     expect(fixed[0].filamentId).toBe('black');
     expect(fixed[1].top).toBe(6);
+    // Stored data is untrusted: junk tops, deleted profiles and extra fields must not survive.
+    const junk = [
+      { filamentId: 'red', top: NaN },
+      { filamentId: 'gone', top: -4 },
+      { filamentId: 'white', top: Infinity, extra: '<script>' },
+      { filamentId: 'black', top: 99 },
+    ] as Band[];
+    const repaired = normalizeStack(junk, profiles);
+    for (const b of repaired) {
+      expect(Object.keys(b).sort()).toEqual(['filamentId', 'top']);
+      expect(profiles.some((p) => p.id === b.filamentId)).toBe(true);
+      expect(Number.isInteger(b.top) && b.top >= 1 && b.top <= 80).toBe(true);
+    }
+    for (let i = 1; i < repaired.length; i++) expect(repaired[i].top).toBeGreaterThan(repaired[i - 1].top);
+    expect(resolveStack(repaired, profiles, lh).every((s) => s.name && s.colorHex)).toBe(true);
   });
 
   it('assigns each layer to the band containing its mid-height', () => {

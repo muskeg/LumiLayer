@@ -30,6 +30,8 @@ export interface StackLayer {
 
 export const MAX_BANDS = 16;
 export const MAX_LAYERS = 80;
+/** Stack suggestion and loadout auto-pick enumerate up to 4-filament sequences, so their cost grows ~P⁴. */
+export const MAX_PROFILES = 32;
 export const TD_MIN = 0.1;
 export const TD_MAX = 20;
 /** Luminance texture value marking frame pixels, which use the frame height instead. */
@@ -94,7 +96,7 @@ function writeJson(key: string, value: unknown) {
 export function loadProfiles(): FilamentProfile[] {
   const data = readJson(PROFILES_KEY);
   const list = Array.isArray(data) ? data.map(sanitizeProfile).filter((p): p is FilamentProfile => !!p) : [];
-  const unique = list.filter((p, i) => list.findIndex((q) => q.id === p.id) === i);
+  const unique = list.filter((p, i) => list.findIndex((q) => q.id === p.id) === i).slice(0, MAX_PROFILES);
   return unique.length ? unique : structuredClone(DEFAULT_PROFILES);
 }
 
