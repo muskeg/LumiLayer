@@ -18,12 +18,22 @@ export interface PaintExportInput {
   /** Bands bottom to top; bands sharing a filament share a materialId. */
   stack: StackLayer[];
   title?: string;
+  /** Above this many triangles the worker waits for a WriteRequest before writing. */
+  confirmAbove?: number;
 }
 
 export interface PaintExportResult {
   bytes: Uint8Array;
   triangles: number;
   parts: number;
+}
+
+/** Second line of defense behind the UI's 1.5 M pixel cap: refuse grids no UI path can produce. */
+export const MAX_EXPORT_CELLS = 6_000_000;
+
+function checkGrid(cols: number, rows: number) {
+  if (!(cols > 0 && rows > 0 && cols * rows <= MAX_EXPORT_CELLS))
+    throw new Error(`Grid ${cols}×${rows} is too large to export (max ${MAX_EXPORT_CELLS / 1e6} M cells). Increase the pixel size.`);
 }
 
 /** Material id of each layer index, from the band containing the layer's mid-height. */
@@ -40,6 +50,7 @@ export function materialOfLayers(stack: StackLayer[], layerHeight: number, layer
 /** Split the heightfield into one closed part per filament, each spanning only its Z bands. */
 export function buildPaintingParts(input: PaintExportInput): Part[] {
   const { heights, cols, rows, layerHeight: lh, stack } = input;
+  checkGrid(cols, rows);
   if (!stack.length) throw new Error('The layer stack is empty.');
   if (heights.length !== cols * rows) throw new Error('Heightmap size does not match its dimensions.');
   const minLayers = Math.max(1, Math.round(input.baseHeight / lh));
@@ -94,10 +105,12 @@ export interface MosaicExportInput {
   /** Loadout, slot 0 = ground. */
   filaments: { name: string; color: string }[];
   title?: string;
+  confirmAbove?: number;
 }
 
 export function buildMosaicParts(input: MosaicExportInput): Part[] {
   const { cols, rows, K, voxels, filaments } = input;
+  checkGrid(cols, rows);
   if (voxels.length !== cols * rows * K) throw new Error('Voxel grid size does not match its dimensions.');
   const meshes = buildVoxelMeshes({
     cols, rows, K, voxels,
@@ -113,25 +126,23 @@ export function buildMosaicParts(input: MosaicExportInput): Part[] {
   return parts;
 }
 
-export function buildMosaic3mf(input: MosaicExportInput): PaintExportResult {
-  return packParts(buildMosaicParts(input), input.title ?? 'LumiLayer filament mosaic');
-}
-
-/** Lithophane export request. Parts are built first; above `confirmAbove` triangles the worker waits for a LithoWriteRequest. */
+/** Lithophane export request (the geometry is copied: the preview keeps using it). */
 export interface LithoExportInput {
   kind: 'litho';
   result: LithoGeometry;
   tolerance: number;
-  confirmAbove: number;
+  confirmAbove?: number;
   title?: string;
 }
 
-export interface LithoWriteRequest {
-  kind: 'litho-write';
+/** Answer to a `confirm` reply: write the held parts, or drop them. */
+export interface WriteRequest {
+  kind: 'write';
   confirmed: boolean;
 }
 
 export function buildLithoParts(r: LithoGeometry, tolerance: number): Part[] {
+  checkGrid(r.cols, r.rows);
   return buildPrintMeshes(r, tolerance).flatMap((mesh, i) =>
     mesh ? [{ name: `${i === 0 ? 'Base' : `Color ${i}`} - ${r.filaments[i].name}`, color: r.filaments[i].color, extruder: i + 1, mesh }] : [],
   );

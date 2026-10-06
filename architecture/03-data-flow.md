@@ -27,11 +27,11 @@ adjust(img.data, settings)                         // brightness / contrast / ga
 Preview (2D canvas drawImage / WebGL2 / 3D three.js)  — for the user to judge
    │
    ▼
-Export  (all in paint/threeMfWorker.ts)
+Export  (all in paint/threeMfWorker.ts, driven by runExport in paint/exportClient.ts)
    LITHO        {kind:'litho', result minus sim/front}  → buildLithoParts
-                  → > 3 M triangles? {confirm} → main asks → {kind:'litho-write'} → write3mfSync
-   PAINT        heights() [read back from GPU] → postMessage(input, [heights.buffer]) → buildPainting3mf
-   MOSAIC       mosaicVoxels(result)           → postMessage(input, [voxels.buffer])  → buildMosaic3mf
+   PAINT        heights() [read back from GPU] → postMessage(input, [heights.buffer]) → buildPaintingParts
+   MOSAIC       mosaicVoxels(result)           → postMessage(input, [voxels.buffer])  → buildMosaicParts
+                  → > 3 M triangles? {confirm} → main asks → {kind:'write', confirmed} → write3mfSync
    │                                             → 3MF bytes transferred back
    ▼
 triggerDownload(blob, exportFileName(...))
@@ -83,7 +83,7 @@ This is the central architectural guarantee and it is implemented differently pe
 | **Litho** solver LUTs | `Float32Array` | `buildSolver` result | until solver key changes | cached on `solver`/`solverKey` |
 | **Litho** `result` | `LithoResult` (many typed arrays) | `main.ts` | until next recompute | per-pixel body thickness + combo |
 | **Litho** export input | `LithoGeometry` (= `LithoResult` minus `sim`/`front`) | worker | per export | **copied** (structured clone), since the preview keeps using `result` |
-| **Litho** parts | `Part[]` | worker | until written or cancelled | held between the `confirm` reply and `litho-write` |
+| **Any mode** parts | `Part[]` | worker | until written or cancelled | held between the `confirm` reply and `write` |
 | **Paint** `px` | `Float32Array` RGBA | `PaintController` | per image | uploaded to GPU |
 | **Paint** GPU image | WebGL `RGBA32F` texture | `preview.ts` (GPU) | per image | `gl.texImage2D` with the same `Float32Array` |
 | **Paint** layer counts | `Uint8Array` (RGBA8) | `readLayers()` | per read | `gl.readPixels`, bottom-row first, flipped |

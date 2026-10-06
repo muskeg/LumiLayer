@@ -90,7 +90,7 @@ hidden dependency; easier to test and to evolve separately.
   bands partition the height, auto-pick is deterministic for a fixed image).
 - `mesh.ts` — the three builders already have manifold tests; add a *size/perf* guard (a small
   case with known triangle count) to catch regressions.
-- `threeMfWorker.ts` — the message protocol, especially the litho `confirm` → `litho-write`
+- `threeMfWorker.ts` — the message protocol, especially the `confirm` → `write`
   round-trip (today verified only manually in the browser).
 
 **Benefit:** the refactor items (I1–I5) become safe, and regressions are caught.
@@ -118,8 +118,9 @@ through `XmlWriter` in ~1 MB chunks. Nothing left on the main thread to optimize
 ---
 
 ### I9 — Typed message protocol for the worker ✅ done (rev. 2)
-`WorkerRequest = PaintExportInput | MosaicExportInput | LithoExportInput | LithoWriteRequest`
-and `WorkerResponse` / `LithoWorkerResponse` are exported from `threeMfWorker.ts` and imported
+`WorkerRequest = PaintExportInput | MosaicExportInput | LithoExportInput | WriteRequest`
+and `WorkerResponse` / `BuildResponse` are exported from `threeMfWorker.ts`; the main-thread
+side lives in one place, `runExport` in `paint/exportClient.ts`.
 (as types) by `main.ts` and both controllers. Painting is the only variant without a `kind`
 tag; adding `kind: 'paint'` would make the union fully discriminated.
 

@@ -171,12 +171,11 @@ view now shares one model. Visible consequence: a dark bottom band is (correctly
 ---
 
 ## B10 — Painting view buttons are named against their labels
-🟡 open
+✅ fixed (rev. 3)
 
-In paint mode `data-view="backlit"` is labelled **Front-lit** and `data-view="front"` is
-labelled **Backlit** (`main.ts`, `setMode` and the `paint.setOpticalMode` call). Behavior is
-correct; the naming is a trap. **Fix:** name views by role (`primary`/`secondary`) or map
-per mode explicitly.
+In paint mode `data-view="backlit"` was labelled **Front-lit** and `data-view="front"`
+**Backlit**. Views are now named by role (`main` / `alt` / `3d`) with a per-mode
+`VIEW_LABELS` table in `main.ts`.
 
 ---
 
@@ -209,7 +208,7 @@ shader.
 The gate could not prevent the freeze it warned about.
 
 **Fix:** litho export runs in `threeMfWorker.ts`: build parts → if > 3 M triangles reply
-`{ confirm, triangles }` and hold the parts → main asks → `litho-write { confirmed }`. Verified
+`{ confirm, triangles }` and hold the parts → main asks → `write { confirmed }`. Verified
 in the browser: 5.4 M triangles → cancel ("Export cancelled") and accept (47 MB 3MF), UI live
 throughout.
 
@@ -228,10 +227,10 @@ throughout.
 | B7 | ✅ | `adjust` clamping — verified OK, no change. | closed |
 | B8 | ✅ | CPU fallback vs shader frame handling — verified consistent. | closed |
 | B9 | 🟠 | Painting Backlit view used an ad-hoc gamma-space model. | ✅ fixed |
-| B10 | 🟡 | Painting view buttons named against their labels. | open |
+| B10 | 🟡 | Painting view buttons named against their labels. | ✅ fixed |
 | B11 | 🟠 | CPU/GPU height matching disagreed on near-ties. | ✅ fixed |
 | B12 | 🟡 | TD floor 0.05 (CPU) vs 1e-3 (GPU). | ✅ fixed |
 | B13 | 🔴 | Litho `confirm` came after the main-thread mesh build. | ✅ fixed |
 
-**Suggested order of remaining work:** B3 + B4 (one luma consolidation pass), B10, then B5
+**Suggested order of remaining work:** B3 + B4 (one luma consolidation pass), then B5
 (UX/model), B2 only if litho filaments become importable.

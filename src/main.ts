@@ -4,8 +4,8 @@ import { exportFileName, triggerDownload } from './download';
 import { adjust, demoImage, loadImage, panRange, renderFramed, sourceAspect, type Source } from './imaging';
 import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Solver } from './lithophane';
 import { PaintController } from './paint/controller';
+import { runExport, type ExportedFile } from './paint/exportClient';
 import { MosaicController } from './paint/mosaicController';
-import type { LithoWorkerResponse, WorkerRequest, WorkerResponse } from './paint/threeMfWorker';
 import type { Preview3D, Preview3DInput } from './preview3d';
 
 type Mode = 'litho' | 'paint' | 'mosaic';
@@ -149,7 +149,13 @@ let result: LithoResult | null = null;
 let imgGrid = { cols: 1, rows: 1, border: 0 };
 let gridSize = { cols: 1, rows: 1 };
 let lastPx = DEFAULTS.pixelMm;
-let view: 'backlit' | 'front' | '3d' = 'backlit';
+/** 'main' is how the print is meant to be seen; 'alt' is the secondary 2D view. Labels depend on the mode. */
+let view: 'main' | 'alt' | '3d' = 'main';
+const VIEW_LABELS: Record<Mode, { main: string; alt: string }> = {
+  litho: { main: 'Backlit', alt: 'Unlit (front)' },
+  paint: { main: 'Front-lit', alt: 'Backlit' },
+  mosaic: { main: 'Front-lit', alt: 'Swatches' },
+};
 let preview3d: Preview3D | null = null;
 let dirty3d = true;
 
@@ -388,8 +394,8 @@ function applyModeUi() {
   const m = settings.mode;
   for (const [section, elem] of sectionEls) elem.hidden = !!section.modes && !section.modes.includes(m);
   for (const c of SECTIONS.flatMap((s) => s.controls)) if (c.modes) controlRows.get(c.key)!.hidden = !c.modes.includes(m);
-  $('button[data-view="backlit"]').textContent = m === 'litho' ? 'Backlit' : 'Front-lit';
-  $('button[data-view="front"]').textContent = m === 'paint' ? 'Backlit' : m === 'mosaic' ? 'Swatches' : 'Unlit (front)';
+  $('button[data-view="main"]').textContent = VIEW_LABELS[m].main;
+  $('button[data-view="alt"]').textContent = VIEW_LABELS[m].alt;
   $('#brand-sub').textContent = m === 'paint' ? 'filament painting' : m === 'mosaic' ? 'filament mosaic' : 'multi-color lithophanes';
   canvas.classList.toggle('crisp', m === 'mosaic');
   showView();
@@ -402,7 +408,7 @@ function showView() {
   glCanvas.hidden = is3d || !isPaint;
   $('#stage3d').hidden = !is3d;
   $('#light-toggle').hidden = !is3d || settings.mode !== 'litho';
-  if (isPaint) paint!.setOpticalMode(view === 'front' ? 'backlit' : 'frontlit');
+  if (isPaint) paint!.setOpticalMode(view === 'alt' ? 'backlit' : 'frontlit');
   if (is3d) update3d();
   else draw2d();
 }
@@ -574,11 +580,11 @@ function compute() {
 
 function draw2d() {
   if (view === '3d') return;
-  if (settings.mode === 'mosaic') return mosaic.draw(canvas, view === 'front' ? 'swatches' : 'predicted');
+  if (settings.mode === 'mosaic') return mosaic.draw(canvas, view === 'alt' ? 'swatches' : 'predicted');
   if (settings.mode !== 'litho' || !result) return;
   canvas.width = result.cols;
   canvas.height = result.rows;
-  canvas.getContext('2d')!.drawImage(view === 'backlit' ? simCanvas : frontCanvas, 0, 0);
+  canvas.getContext('2d')!.drawImage(view === 'main' ? simCanvas : frontCanvas, 0, 0);
 }
 
 let timer3d = 0;
@@ -758,44 +764,20 @@ function setupFileInput() {
 
 let lithoWorker: Worker | null = null;
 
-async function exportLitho() {
-  const HEAVY_TRIANGLES = 3_000_000;
-  if (!result) return;
-  const worker = (lithoWorker ??= new Worker(new URL('./paint/threeMfWorker.ts', import.meta.url), { type: 'module' }));
-  const send = <T>(msg: WorkerRequest) =>
-    new Promise<T>((resolve, reject) => {
-      worker.onmessage = (e: MessageEvent<T>) => resolve(e.data);
-      worker.onerror = (e) => reject(new Error(e.message || 'Export worker failed'));
-      worker.postMessage(msg);
-    });
-  setStatus('Building meshes…');
+async function exportLitho(): Promise<ExportedFile | null> {
+  if (!result) return null;
+  lithoWorker ??= new Worker(new URL('./paint/threeMfWorker.ts', import.meta.url), { type: 'module' });
   // The preview rasters stay here; the worker only needs the geometry.
   const { sim: _sim, front: _front, ...geometry } = result;
-  const built = await send<LithoWorkerResponse>({ kind: 'litho', result: geometry, tolerance: settings.meshTolerance, confirmAbove: HEAVY_TRIANGLES });
-  let res: WorkerResponse;
-  if ('confirm' in built) {
-    if (
-      !confirm(
-        `This model has ${(built.triangles / 1e6).toFixed(1)} M triangles. Slicers may take very long or appear stuck.\n\n` +
-          'To lighten it: raise Color cell, raise Simplify, increase Pixel size or turn off Dithering.\n\nExport anyway?',
-      )
-    ) {
-      worker.postMessage({ kind: 'litho-write', confirmed: false } satisfies WorkerRequest);
-      setStatus('Export cancelled');
-      return;
-    }
-    setStatus(`Writing 3MF (${(built.triangles / 1e6).toFixed(2)} M triangles)…`);
-    res = await send<WorkerResponse>({ kind: 'litho-write', confirmed: true });
-  } else res = built;
-  if (!res.ok) throw new Error(res.error);
-  triggerDownload(new Blob([res.bytes], { type: 'model/3mf' }), exportFileName(sourceName, 'lithophane'));
-  setStatus(`Exported ${res.parts} parts · ${(res.triangles / 1e6).toFixed(2)} M triangles · ${(res.bytes.byteLength / 1e6).toFixed(1)} MB`);
-}
-
-async function exportPainting() {
-  setStatus('Building 3MF in the background…');
-  const r = await (settings.mode === 'mosaic' ? mosaic.exportModel(sourceName) : paint!.exportModel(sourceName));
-  setStatus(`Exported ${r.parts} parts · ${(r.triangles / 1e6).toFixed(2)} M triangles · ${(r.bytes / 1e6).toFixed(1)} MB`);
+  const file = await runExport(
+    lithoWorker,
+    { kind: 'litho', result: geometry, tolerance: settings.meshTolerance },
+    [],
+    'raise Color cell, raise Simplify, increase Pixel size or turn off Dithering',
+    setStatus,
+  );
+  if (file) triggerDownload(new Blob([file.bytes], { type: 'model/3mf' }), exportFileName(sourceName, 'lithophane'));
+  return file;
 }
 
 function setupExport() {
@@ -803,7 +785,10 @@ function setupExport() {
   btn.onclick = async () => {
     btn.disabled = true;
     try {
-      await (settings.mode === 'litho' ? exportLitho() : exportPainting());
+      setStatus('Building 3MF in the background…');
+      const m = settings.mode;
+      const r = await (m === 'litho' ? exportLitho() : m === 'mosaic' ? mosaic.exportModel(sourceName) : paint!.exportModel(sourceName));
+      setStatus(r ? `Exported ${r.parts} parts · ${(r.triangles / 1e6).toFixed(2)} M triangles · ${(r.bytes.byteLength / 1e6).toFixed(1)} MB` : 'Export cancelled');
     } catch (e) {
       console.error(e);
       setStatus(`Export failed: ${(e as Error).message}`);

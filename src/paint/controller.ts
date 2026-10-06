@@ -7,8 +7,8 @@ import {
 } from './model';
 import { PaintPreview, type OpticalMode } from './preview';
 import { bandOptics, bestLayer, pathLabs, targetLab, type HeightMode } from './optics';
+import { runExport, type ExportedFile } from './exportClient';
 import { suggestStack } from './suggest';
-import type { WorkerResponse } from './threeMfWorker';
 
 /** Filament slots of a single AMS unit. */
 export const AMS_SLOTS = 4;
@@ -159,21 +159,13 @@ export class PaintController {
     };
   }
 
-  /** Build the 3MF in a Web Worker and download it. */
-  exportModel(title: string): Promise<{ triangles: number; parts: number; bytes: number }> {
+  /** Build the 3MF in a Web Worker and download it; null if the user cancels a heavy export. */
+  async exportModel(title: string): Promise<ExportedFile | null> {
     const input = this.exportInput(title);
     this.worker ??= new Worker(new URL('./threeMfWorker.ts', import.meta.url), { type: 'module' });
-    const worker = this.worker;
-    return new Promise((resolve, reject) => {
-      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-        const r = e.data;
-        if (!r.ok) return reject(new Error(r.error));
-        triggerDownload(new Blob([r.bytes], { type: 'model/3mf' }), exportFileName(title, 'painting'));
-        resolve({ triangles: r.triangles, parts: r.parts, bytes: r.bytes.byteLength });
-      };
-      worker.onerror = (e) => reject(new Error(e.message || 'Export worker failed'));
-      worker.postMessage(input, [input.heights.buffer]);
-    });
+    const file = await runExport(this.worker, input, [input.heights.buffer], 'increase Pixel size or lower the top band', this.onStatus);
+    if (file) triggerDownload(new Blob([file.bytes], { type: 'model/3mf' }), exportFileName(title, 'painting'));
+    return file;
   }
 
   /** Replace the stack with the best up-to-4-filament stack for the current image, from the user's profiles. */

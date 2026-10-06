@@ -9,7 +9,7 @@ import { AMS_SLOTS, el, isLight } from './controller';
 import type { MosaicExportInput } from './export';
 import { restoreLoadout, normalizeLoadout, storeLoadout, type FilamentProfile } from './model';
 import { pickLoadout } from './loadout';
-import type { WorkerResponse } from './threeMfWorker';
+import { runExport, type ExportedFile } from './exportClient';
 
 export interface MosaicSettings {
   layerHeight: number;
@@ -201,10 +201,10 @@ export class MosaicController {
 
   exportModel(title: string) {
     if (!this.result) return Promise.reject(new Error('Nothing to export yet.'));
-    return this.runExport(this.result, title, 'mosaic');
+    return this.exportResult(this.result, title, 'mosaic');
   }
 
-  private runExport(res: MosaicResult, title: string, kind: string): Promise<{ triangles: number; parts: number; bytes: number }> {
+  private async exportResult(res: MosaicResult, title: string, kind: string): Promise<ExportedFile | null> {
     const { voxels, K } = mosaicVoxels(res);
     const px = this.pixelMm;
     const input: MosaicExportInput = {
@@ -214,16 +214,13 @@ export class MosaicController {
       title,
     };
     const worker = new Worker(new URL('./threeMfWorker.ts', import.meta.url), { type: 'module' });
-    return new Promise<{ triangles: number; parts: number; bytes: number }>((resolve, reject) => {
-      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-        const r = e.data;
-        if (!r.ok) return reject(new Error(r.error));
-        triggerDownload(new Blob([r.bytes], { type: 'model/3mf' }), exportFileName(title, kind));
-        resolve({ triangles: r.triangles, parts: r.parts, bytes: r.bytes.byteLength });
-      };
-      worker.onerror = (e) => reject(new Error(e.message || 'Export worker failed'));
-      worker.postMessage(input, [voxels.buffer]);
-    }).finally(() => worker.terminate());
+    try {
+      const file = await runExport(worker, input, [voxels.buffer], 'increase Pixel size, raise Min island or turn off Dithering', this.onStatus);
+      if (file) triggerDownload(new Blob([file.bytes], { type: 'model/3mf' }), exportFileName(title, kind));
+      return file;
+    } finally {
+      worker.terminate();
+    }
   }
 
   private async exportSwatches() {
@@ -232,7 +229,8 @@ export class MosaicController {
     this.swatchButton.disabled = true;
     try {
       this.onStatus('Building swatch plate…');
-      const r = await this.runExport(res, 'lumilayer', 'swatch-plate');
+      const r = await this.exportResult(res, 'lumilayer', 'swatch-plate');
+      if (!r) return this.onStatus('Swatch plate export cancelled');
       this.onStatus(`Swatch plate exported (${r.parts} parts). Print it with the same layer height, then tune each filament's color and TD until the "Swatches" view looks like the print.`);
     } catch (e) {
       this.onStatus(`Swatch plate export failed: ${(e as Error).message}`);

@@ -59,8 +59,9 @@ The pure core (`color`, `mesh`, `threemf`, `imaging`, `paint/{model,km,optics,mo
 | Module | Responsibility | Notes |
 | --- | --- | --- |
 | `paint/preview.ts` | WebGL2 shaders; per-pixel height matching; display + `readLayers` read-back | **source of truth** for painting heights. `K_TD`/`TD_FLOOR`/`MATCH_TIE` interpolated from TS; Backlit view uses `absorption()` (`u_filamentAbs`). Handles `webglcontextlost`/`restored`. |
-| `paint/export.ts` | part builders for all three modes + `packParts` | `buildLithoParts`, `buildPaintingParts`, `buildMosaicParts`, `buildPainting3mf`, `buildMosaic3mf`, `packParts`, `countTriangles`, message types. |
-| `paint/threeMfWorker.ts` | dedicated worker; builds every 3MF | paint (transferred heights), mosaic (transferred voxels), litho (two-step: build → `confirm` reply if > threshold → `litho-write`). Exports `WorkerRequest`, `WorkerResponse`, `LithoWorkerResponse`. |
+| `paint/export.ts` | part builders for all three modes + `packParts` | `buildLithoParts`, `buildPaintingParts`, `buildMosaicParts`, `buildPainting3mf`, `packParts`, `countTriangles`, `MAX_EXPORT_CELLS` (worker-side grid cap), message types. |
+| `paint/threeMfWorker.ts` | dedicated worker; builds every 3MF | paint (transferred heights), mosaic (transferred voxels), litho (copied geometry). Above `confirmAbove` triangles it replies `confirm` and waits for `{ kind: 'write' }`. Exports `ExportRequest`, `WorkerRequest`, `WorkerResponse`, `BuildResponse`. |
+| `paint/exportClient.ts` | main-thread side of the export protocol | `runExport` (send → optional `confirm()` → write), `HEAVY_TRIANGLES = 3 M`; used by `main.ts` and both controllers. |
 | `paint/controller.ts` | `PaintController`: profiles, bands, GPU preview, worker export, stack panel, suggest; exports `el`, `isLight`, `AMS_SLOTS = 4` | `heights()` reads GPU layer counts, CPU fallback via `optics.ts`. Reuses one worker. |
 | `paint/mosaicController.ts` | `MosaicController`: loadout, combo solve, CPU preview, swatch plate, worker export, auto-pick | imports `el`, `isLight`, `AMS_SLOTS` **from `controller.ts`** (🟠 coupling). Creates a new worker per export. |
 | `preview3d.ts` | isolated three.js `Preview3D`, lazily imported | decoupled from export; own rAF loop. |
@@ -97,7 +98,7 @@ belongs to each optical model.
 
 ## 6. Test coverage map
 
-`core.test.ts` (32 tests) exercises the pure core only:
+`core.test.ts` (33 tests) exercises the pure core only:
 
 - solver: enumeration, LUT, `bestCombo`, `targetFor`
 - mesh: manifold closure (edge-pairing + positive signed volume) for the three builders

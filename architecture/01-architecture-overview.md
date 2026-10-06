@@ -172,12 +172,13 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
 | **All** mesh builds + 3MF writes | **Web Worker** (`threeMfWorker.ts`) | Keeps the UI responsive for large grids |
 | 3D viewport | main thread (three.js, lazy) | Visualization only, never on the export path |
 
-> **Litho export protocol (revision 2):** the worker builds the litho parts first. If they
-> exceed 3 M triangles it answers `{ confirm: true, triangles }` and keeps the parts; the main
-> thread asks the user and sends `litho-write` with `confirmed: true/false`. The expensive mesh
-> build therefore never blocks the UI, and cancelling skips the XML + zip step. (Before: the
-> meshes were built on the main thread *before* the `confirm`, so the gate did not prevent the
-> freeze. Only deflate had been off-thread, via fflate's async `zip`.)
+> **Export protocol (revision 2, all modes since rev. 3):** `runExport` (`paint/exportClient.ts`)
+> sends the request with `confirmAbove = 3 M` triangles. The worker builds the parts; if they
+> exceed it, it answers `{ confirm: true, triangles }` and keeps the parts. The main thread asks
+> the user (with mode-specific tips to lighten the model) and sends `{ kind: 'write',
+> confirmed }`. The expensive mesh build never blocks the UI, and cancelling skips the XML + zip
+> step. (Before: litho built meshes on the main thread *before* its `confirm`, and painting and
+> mosaic had no gate at all.)
 
 ## 5. Notable design decisions (the good parts)
 
@@ -221,13 +222,14 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
   inconsistency users actually meet is **painting vs mosaic**: both read the *same stored
   profile TD* through different models (see the color-models doc).
 
-- The painting view buttons are named against their labels: in paint mode
-  `data-view="backlit"` shows **Front-lit** and `data-view="front"` shows **Backlit**
-  (`main.ts`). It works, but it is a trap for the next edit.
+- The 2D view buttons are named by role (rev. 3): `data-view="main"` is how the print is meant
+  to be seen, `data-view="alt"` the secondary view; `VIEW_LABELS` in `main.ts` gives the
+  per-mode labels (litho Backlit / Unlit, painting Front-lit / Backlit, mosaic Front-lit /
+  Swatches).
 
 ## 7. Testing posture
 
-A single, dense `core.test.ts` (32 tests) covers the riskiest math and geometry: solver
+A single, dense `core.test.ts` (33 tests) covers the riskiest math and geometry: solver
 tone mapping, combo budget, manifold closure and volume conservation across modes and
 filament sets, band→material mapping, 3MF package structure, **CPU vs shader height matching
 (a statement-for-statement port of `matchLayers`)**, KM convergence and TD contrast,

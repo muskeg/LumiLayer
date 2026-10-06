@@ -217,6 +217,11 @@ describe('filament painting', () => {
     expect(volume).toBeCloseTo(expected, 4);
   });
 
+  it('refuses to export grids beyond the worker-side cap', () => {
+    const input = { ...paintInput(2, 2, 1), cols: 4000, rows: 2000 };
+    expect(() => buildPaintingParts(input)).toThrow(/too large to export/);
+  });
+
   it('reads correctly from the top: image column 0 at x = 0', () => {
     // Left column tall enough to reach white, right column stays black.
     const heights = Float32Array.from([16, 3, 16, 3], (l) => l * lh);
