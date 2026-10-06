@@ -88,7 +88,7 @@ class Evaluator {
       name: '', colorHex: profiles[f].color, td: profiles[f].td, materialId: 0,
       startZ: (j ? tops[j - 1] : 0) * lh, endZ: tops[j] * lh,
     }));
-    const path = pathLabs(bandOptics(stack, lh), lh, minL, maxL, this.path);
+    const path = pathLabs(bandOptics(stack, lh), minL, maxL, this.path);
     const { lab, weight, lum } = this.samples;
     const match = this.input.heightMode !== 'luminance';
     let err = 0;

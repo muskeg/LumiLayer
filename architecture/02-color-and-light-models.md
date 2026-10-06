@@ -1,14 +1,18 @@
 # 02 — Color & Light Models (the mathematics)
 
 This is the document to read if you want to understand *why* LumiLayer works, and where the
-subtle numerical risk lives. There are **three distinct optical models** in the codebase —
-Beer–Lambert transmission for every backlit view, Beer–Lambert hiding for front-lit painting,
-Kubelka–Munk for the mosaic — and a different TD reading tied to each. Getting these straight is
-the whole game.
+subtle numerical risk lives. Since revision 3 there are **two optical models**, one per kind of
+filament data:
 
-> **(corrected)** The first pass missed that the painting mode's **Backlit** tab used a
-> fourth, ad-hoc model (`exp(−K_TD/TD·(1−sRGB)·d)`: gamma-space absorption, white filament
-> fully transparent). Revision 2 replaced it with the litho `absorption()`.
+- **Lithophane presets** (in-memory, 10% TD convention): Beer–Lambert transmission.
+- **Filament profiles** (painting + mosaic, persisted, 5% contrast TD convention):
+  Kubelka–Munk two-flux, for every view — painting Front-lit, painting Backlit, mosaic.
+
+> **History.** The first pass described three models and missed a fourth: painting front-lit
+> used Beer–Lambert *hiding*, and its Backlit tab an ad-hoc `exp(−K_TD/TD·(1−sRGB)·d)` (white
+> fully transparent). Revision 2 replaced the latter with the litho `absorption()`; revision 3
+> (B5) moved all painting views onto the mosaic's KM model, so one profile TD now means one
+> thing everywhere it is used.
 
 ## 1. Color spaces and shared primitives (`color.ts`)
 
@@ -21,8 +25,8 @@ applied only at the boundary (display, or the input image).
 | `luminance` | `0.2126 r + 0.7152 g + 0.0722 b` (Rec. 709 / BT.709 on **linear** values) | Used in the litho solver and for "relative luminance → CIE L*". |
 | `lightness` | CIE L\* normalized to 0..1 (the `116·cbrt(y) − 16` piece, linear below `216/24389`) | Correct L\* formula. |
 | `linearToOklab` | Oklab from linear RGB, with cube-root of the LMS cone response | The perceptual space used for all color matching. |
-| `absorption` | Beer–Lambert extinction coefficient of a filament (see §3) | Litho solver and the painting Backlit view. |
-| `TD_FLOOR` | `0.05` mm | Smallest TD any model uses; shared by `absorption`, `optics.ts` and the shader. |
+| `absorption` | Beer–Lambert extinction coefficient of a filament (see §3) | Litho solver only (since rev. 3). |
+| `TD_FLOOR` | `0.05` mm | Smallest TD any model uses; shared by `absorption` and the KM scattering solve. |
 
 **Perceptual matching metric.** All three modes minimize a distance in **Oklab** where the
 chroma axes are scaled by `sqrt(W)`. The weight differs by path:
@@ -36,28 +40,23 @@ chroma axes are scaled by `sqrt(W)`. The weight differs by path:
 > is well-behaved near white/black, and its a/b axes are roughly aligned with hue, which is
 > exactly what "match the color of a pixel" needs.
 
-## 2. TD — different meanings of the *same slider*
+## 2. TD — two conventions, one per kind of filament data
 
-This is the single most confusing aspect of the app and the most likely source of
-user-facing surprises. The user sets one "TD (mm)" per filament, but each model interprets it
-differently:
+| Where | Model | Meaning of 1 TD |
+| --- | --- | --- |
+| **Lithophane** presets | Beer–Lambert extinction (`absorption`) | `SCATTER = ln(10)` of achromatic extinction → **10%** of *that channel's* light left |
+| **Filament profiles**: painting Front-lit, painting Backlit, mosaic | Kubelka–Munk (`paint/km.ts`) | scattering S solved so the white-vs-black background contrast after 1 TD is `TD_CONTRAST = 5%` (most transparent channel) |
 
-| Where | Model | Meaning of 1 TD | Residual after 1 TD |
-| --- | --- | --- | --- |
-| **Lithophane** and **painting Backlit view** | Beer–Lambert extinction (`absorption`) | `SCATTER = ln(10)` of achromatic extinction → **10%** of *that channel's* light left | **10%** transmission |
-| **Painting (front-lit)** | Beer–Lambert hiding | `K_TD = −ln(0.05)` of layer-hiding → **5%** of what's *below* still shows | **5%** of the background |
-| **Mosaic** | Kubelka–Munk | scattering S solved so background *contrast* after 1 TD = `TD_CONTRAST` | **5%** of the background *contrast* |
+**B5 (fixed in rev. 3).** Painting and mosaic share the stored profiles, but used to read the
+same TD through different models (Beer–Lambert hiding vs KM), and the painting Backlit view
+through a third (litho `absorption`, 10%). Now each profile's TD is turned into KM constants
+once (`filamentOptics` → per-layer `r`, `t`), and every profile-based view uses them. Tested:
+a painting band stack prints the same color as the same mosaic combo, and one TD of a painting
+band leaves exactly `TD_CONTRAST` of the background.
 
-**Where it actually bites (corrected):** litho filaments are in-memory presets edited with
-their own inputs and are *not* shared with the paint/mosaic profiles, so "tune in litho, reuse
-in paint" requires the user to retype the value. The real overlap is **painting vs mosaic**:
-both read the *same stored profile TD*, through different models (hiding vs KM contrast), so
-one number predicts two slightly different looks. Since revision 2 a profile TD is also read by
-the painting Backlit view with the 10% convention.
-
-The right long-term fix is *not* a `tdConvention` field on the filament type (the first pass
-proposed that): TD is a measured property of the filament, the convention belongs to each
-model. Each model should derive its constants from one physical TD.
+Lithophane presets keep their own Beer–Lambert model and 10% reading: they are separate data
+(in memory, never shared with profiles), and the litho solver's closed-form body-thickness
+inversion depends on Beer–Lambert. Moving litho to KM would be a separate, larger change.
 
 ## 3. The three optical models, in math
 
@@ -110,36 +109,39 @@ t = min( maxThickness,  minThickness − ln(s) / a0Y )
 
 This is the closed-form inversion of Beer–Lambert — no search, no iteration. Clean.
 
-### 3.2 Filament painting — Beer–Lambert layer-hiding (front-lit)
+### 3.2 Filament painting — Kubelka–Munk, one layer at a time (since rev. 3)
 
-Front-lit, each layer *hides* what's below. Walking up the stack, the visible color at layer
-top is:
+Each band's filament is reduced to the KM reflectance `r` and transmittance `t` of **one
+layer** (`oneLayer` in `optics.ts`, from `filamentOptics` in `km.ts`; cached per color/TD/layer
+height). Walking up the stack one layer at a time over black:
 
 ```
-c_visible = mix( layerColor, colorBelow, exp( −k · d ) ),   k = K_TD / TD,  K_TD = −ln(0.05)
+R ← r + t²·R / (1 − r·R)        reflectance seen from the top (front-lit color)
+T ← T·t / (1 − r·R_old)          transmittance (Backlit view), using R before the update
 ```
 
-i.e. after 1 TD of the filament, only 5% of the background color remains; the rest is the
-layer's own color. This is a *two-state* (reflect + hide) model — simpler than KM, and adequate
-for a stack where each band is a single color.
+This is the standard KM composition (exact for stacked identical sub-layers), so n layers of a
+band give the same result as the mosaic's n-layer tables. A translucent band *filters* what is
+below (translucent red over white prints a clean red) instead of fading toward its own color,
+which changes what Suggest picks: on a black/red/white test image it now prefers
+black → white → red over black → red → white.
 
-- **Preview (`paint/preview.ts`):** the fragment shader implements exactly this, both in
-  "display" mode and in "read back layer counts" mode (`matchLayers`). Its `K_TD`, `TD_FLOOR`
-  and `MATCH_TIE` constants are **interpolated into the GLSL source from `optics.ts` /
-  `color.ts`** (revision 2; before, `K_TD` was hard-coded and the TD floor was `1e-3` in GLSL vs
-  `0.05` on the CPU).
+(Before rev. 3: Beer–Lambert *hiding*, `mix(layerColor, below, exp(−K_TD/TD·d))` with
+`K_TD = −ln 0.05`. Same 5% reading at exactly 1 TD, but no filtering, a different curve, and
+a different model from the mosaic and from its own Backlit view.)
+
+- **Preview (`paint/preview.ts`):** the fragment shader implements exactly this in display
+  mode (front-lit `R`, backlit `T`) and in read-back mode (`matchLayers`). It receives
+  `u_layerR` / `u_layerT` per band from the same `oneLayer` the CPU uses; `MATCH_TIE` is
+  interpolated into the GLSL source.
 - **CPU mirror (`optics.ts`):** `pathLabs` walks the same recurrence to build the
   height→Oklab path used by `bestLayer`, by the no-WebGL fallback in
   `PaintController.heights()`, and by `suggest`. The two implementations are pinned by a
   **differential test** (`CPU height matching picks the same layer as the preview shader`)
   that ports `matchLayers` statement-for-statement and compares 480 random pixel/stack cases.
-- **Ties:** that test found real divergences. When a saturated band repeats the same color
-  over several heights, the errors are equal up to float noise (float32 storage on the CPU,
-  float32 math on the GPU), so the two paths picked different heights. Both now treat errors
+- **Ties:** when a saturated band repeats the same color over several heights, the errors are
+  equal up to float noise, so the two paths could pick different heights. Both treat errors
   within `MATCH_TIE = 1e-6` (≈ ΔE 0.001) as ties that go to the lower height.
-- **Backlit view:** `u_mode == 0` multiplies by `exp(−absorption·d)` per band, with
-  `absorption()` computed on the CPU and uploaded as `u_filamentAbs`. Same model as the litho
-  solver.
 
 ### 3.3 Mosaic — Kubelka–Munk two-flux (front-lit)
 
@@ -219,8 +221,8 @@ finds the true nearest neighbor against brute force for random points. Good.
 - ~~**Two implementations of the painting recurrence** (GPU shader + `optics.ts`) with no test.~~
   **Fixed (rev. 2):** shared constants + differential test + `MATCH_TIE` (see §3.2). The GLSL
   and TS are still two implementations; the test is what keeps them together.
-- **TD meaning differs by model** for the same stored value; the painting-vs-mosaic overlap is
-  the one users meet (see §2).
+- ~~**TD meaning differs by model** for the same stored value.~~ Fixed in rev. 3 (B5): all
+  profile-based views use one KM model; only litho presets keep their own convention (§2).
 - **`hexToRgb` falls back to white on parse failure** (`color.ts`). (corrected) This path is
   not reachable from the UI today: litho colors come from valid presets or
   `<input type="color">` (always `#rrggbb`), and stored profiles are validated by

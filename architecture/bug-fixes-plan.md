@@ -85,8 +85,26 @@ domain; the `isLight` threshold stays 140/255, tested).
 ---
 
 ## B5 — TD meaning differs across models for the same filament value
-🟠 (user-confusing, not a crash)
+✅ fixed (rev. 3)
 
+**What was done:** every view that reads a *profile* TD — painting Front-lit, painting Backlit,
+mosaic — now uses the mosaic's Kubelka–Munk model. `oneLayer` (`optics.ts`) turns a profile's
+color + TD into the KM reflectance/transmittance of one layer via `filamentOptics`; the shader
+and the CPU path add layers one at a time with the standard KM composition. `K_TD` and the
+Beer–Lambert hiding model are gone. Tests: a painting band stack prints the same color as the
+same mosaic combo, and one TD of a painting band leaves exactly `TD_CONTRAST` of the background.
+
+**Visible effects:** translucent bands now *filter* what is below instead of fading to their own
+color, so painting previews and Suggest results change (e.g. Suggest now puts red *over* white
+for a clean red). The Backlit view shows KM transmittance of the same stack.
+
+**Deliberately not changed:** lithophane presets keep Beer–Lambert and the 10% reading. They
+are separate in-memory data, and the litho solver's closed-form body thickness depends on
+Beer–Lambert.
+
+The original analysis follows for reference.
+
+**(at review)**
 **(corrected)** The scenario "tune in litho, reuse in paint" needs the user to retype the value:
 litho filaments are in-memory presets, not shared with profiles. The overlap users actually
 meet is **painting vs mosaic**, which read the *same stored profile TD* through different
@@ -138,7 +156,8 @@ absorption from *gamma-encoded* color, the 5% painting TD reading, and zero abso
 (a white band passed all light).
 
 **Fix:** the shader's backlit branch now multiplies by `exp(−u_filamentAbs[i]·d)`, with
-`u_filamentAbs` = `absorption({ color, td })` from `color.ts` — the litho model. Every backlit
+`u_filamentAbs` = `absorption({ color, td })` from `color.ts` — the litho model. (Superseded in
+rev. 3 by B5: the Backlit view now shows the KM transmittance of the stack.) Every backlit
 view now shares one model. Visible consequence: a dark bottom band is (correctly) near-opaque.
 
 ---
@@ -195,7 +214,7 @@ throughout.
 | B2 | 🟡 | Litho path does not validate filament color (not reachable from the UI). | open, low |
 | B3 | 🟡 | `imaging.adjust` saturation used BT.601 luma; others Rec.709. | ✅ fixed |
 | B4 | 🟡 | `lumaOf` (sRGB) vs `luminance` (linear) — same weights, different domain. | ✅ fixed |
-| B5 | 🟠 | TD meaning differs by model; painting vs mosaic share stored TDs. | open (UX/model) |
+| B5 | 🟠 | TD meaning differs by model; painting vs mosaic share stored TDs. | ✅ fixed (KM for all profile views) |
 | B6 | 🟠 | Two `hexToRgb` with different fallbacks. | ✅ fixed |
 | B7 | ✅ | `adjust` clamping — verified OK, no change. | closed |
 | B8 | ✅ | CPU fallback vs shader frame handling — verified consistent. | closed |

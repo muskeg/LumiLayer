@@ -1,4 +1,4 @@
-import { hexToRgb, srgbToLinear } from '../color';
+import { hexToRgb, srgbToLinear, TD_FLOOR } from '../color';
 
 /**
  * Kubelka–Munk two-flux optics for front-lit filament stacks, per RGB channel.
@@ -52,7 +52,7 @@ function scatteringFor(channels: KmChannel[], td: number): number {
     if (contrast(Math.exp(mid)) > TD_CONTRAST) lo = mid;
     else hi = mid;
   }
-  return Math.exp((lo + hi) / 2) / Math.max(0.01, td);
+  return Math.exp((lo + hi) / 2) / Math.max(TD_FLOOR, td);
 }
 
 export interface FilamentOptics {

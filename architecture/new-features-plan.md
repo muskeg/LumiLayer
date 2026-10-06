@@ -7,7 +7,7 @@ stage, not by size: within a stage, items are roughly independent and each names
 building blocks it reuses.
 
 Existing building blocks referenced below:
-- **Three optical models** (Beer–Lambert transmission for every backlit view, Beer–Lambert hiding, Kubelka–Munk) — `color.ts` / `lithophane.ts`, `paint/optics.ts`, `paint/km.ts`.
+- **Two optical models** (Beer–Lambert for lithophane presets; Kubelka–Munk for every painting and mosaic view) — `color.ts` / `lithophane.ts`, `paint/km.ts` / `paint/optics.ts`.
 - **Shared manifold mesher** + 3MF writer — `mesh.ts`, `threemf.ts`.
 - **Worker export for all three modes** with transferred buffers — `paint/threeMfWorker.ts`.
 - **Combo set + k-d tree + dithering + island merge** — `paint/mosaic.ts`.

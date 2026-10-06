@@ -101,10 +101,10 @@ tag; adding `kind: 'paint'` would make the union fully discriminated.
 
 ### I10 — Document the TD meanings at the point of use ✅ done (rev. 3)
 The shared Filaments panel (painting + mosaic) switches its hint and the TD slider tooltips with
-the mode (`PaintController.setTdHelp`, texts in `TD_HELP`): painting explains the 5% hiding
-reading and that the Backlit view reads ~10% light; mosaic explains the 5% contrast reading and
-tinting. The panel also says the profiles are shared by both modes. The litho legend states the
-~10% light reading.
+the mode (`PaintController.setTdHelp`, texts in `TD_HELP`). Since B5 both texts give the same
+5% contrast reading (with "tints the bands / tiles under them") and say that painting and mosaic
+use the same model. The panel also says the profiles are shared by both modes. The litho legend
+states the ~10% light reading.
 
 ---
 

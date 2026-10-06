@@ -18,7 +18,7 @@ own solver and its own mesh builder (all built on the shared `meshVoxels`).
 | Mode | Light path | Color source | Height source | Optical model |
 | --- | --- | --- | --- | --- |
 | **Lithophane** | Backlit | Thin CMY-style slab in front | Body thickness (inverse of brightness) | Beer–Lambert transmission |
-| **Filament painting** | Front-lit (plus a Backlit preview view) | Stack of height bands, one filament per band | Either brightness, or "height whose printed color matches" | Beer–Lambert layer hiding (front-lit view); the litho Beer–Lambert transmission (Backlit view) |
+| **Filament painting** | Front-lit (plus a Backlit preview view) | Stack of height bands, one filament per band | Either brightness, or "height whose printed color matches" | Kubelka–Munk, one layer at a time (same model as the mosaic, both views; rev. 3) |
 | **Filament mosaic** | Front-lit | Per-tile short filament combos | Ground + combo height | Kubelka–Munk two-flux |
 
 ## 2. High-level module decomposition
@@ -68,9 +68,9 @@ own solver and its own mesh builder (all built on the shared `meshVoxels`).
   `willReadFrequently`, and does tone adjustment (brightness/contrast/gamma/saturation).
   Outputs sRGB floats 0..1.
 - **`color.ts`** — pure color math: sRGB↔linear, CIE L*, Oklab, Rec.709 luminance, the
-  shared `TD_FLOOR`, and the Beer–Lambert absorption coefficient for a filament. The single
-  shared definition of "what a filament's color means optically" for **every backlit view**
-  (the litho solver and the painting Backlit preview).
+  shared `TD_FLOOR`, and the Beer–Lambert absorption coefficient for a filament — the
+  definition of "what a filament's color means optically" for the **lithophane** (presets only;
+  profile filaments use the KM model in `paint/km.ts`).
 - **`lithophane.ts`** — the backlit solver. Enumerates color-layer combos, precomputes a
   32³ lookup table mapping (quantized target RGB) → best combo, and produces per-pixel
   color-layer counts + body thickness + two preview rasters (backlit sim and front face).
@@ -78,8 +78,9 @@ own solver and its own mesh builder (all built on the shared `meshVoxels`).
   layer-hiding), and the CPU mirror of the GPU height-matching shader.
 - **`paint/preview.ts`** — the WebGL2 fragment shader that renders the painting preview at
   display-refresh rate and, in a second pass, writes per-pixel layer counts back for export.
-  Its constants (`K_TD`, `TD_FLOOR`, `MATCH_TIE`) are interpolated from the TS modules, and its
-  Backlit view uploads per-band `absorption()` values.
+  Its `MATCH_TIE` constant is interpolated from the TS modules, and it receives each band's
+  one-layer KM reflectance/transmittance (`u_layerR`, `u_layerT`) from the same `oneLayer` the
+  CPU uses.
 - **`paint/km.ts`** — the Kubelka–Munk two-flux model for the mosaic; numerically stable
   layer reflectance/transmittance tables plus a `TD → scattering` solver (bisection).
 - **`paint/mosaic.ts`** — combo enumeration + dedupe, a hand-rolled k-d tree, the per-tile
@@ -128,7 +129,7 @@ well-posed, cheap problem.
 Heights come from one of two rules:
 
 - **Best color match (default):** the height whose *printed* color (walking up the band
-  stack with Beer–Lambert hiding) is closest to the pixel in chroma-weighted Oklab. This is
+  stack with Kubelka–Munk, one layer at a time) is closest to the pixel in chroma-weighted Oklab. This is
   computed **on the GPU** (`matchLayers` in the fragment shader) and the per-pixel layer
   counts are *read back* — so the export is exactly the heights the preview shows. (The CPU
   mirror in `optics.ts` is float64 vs the GPU's float32; errors within `MATCH_TIE` count as
@@ -141,10 +142,10 @@ height. The same filament may occupy multiple non-adjacent bands (they share one
 id, but each band is a separate Z slice). `resolveStack` maps bands → Z ranges + material ids;
 `materialOfLayers` maps each layer index → the material of the band containing its mid-height.
 
-The **Backlit** tab of painting mode shows the same heightfield held up to a light. It uses the
-lithophane's `absorption()` per band (revision 2; previously an ad-hoc
-`exp(−K_TD/TD·(1−sRGB)·d)` that let white filament pass all light). A dark bottom band is
-therefore (correctly) close to opaque in this view.
+The **Backlit** tab of painting mode shows the same heightfield held up to a light, using the
+KM transmittance of the same layer stack (rev. 3; rev. 2 had used the litho `absorption()`, and
+before that an ad-hoc `exp(−K_TD/TD·(1−sRGB)·d)` that let white filament pass all light). A
+dark bottom band is therefore (correctly) close to opaque in this view.
 
 ### 3.3 Filament mosaic (front-lit, per-tile combos)
 
@@ -219,19 +220,18 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
   `paint/mosaic.ts`). `MosaicFilament` is an alias of a `FilamentProfile` subset (rev. 3), so
   the real split is litho (in-memory presets, not persisted) vs paint/mosaic (persisted
   profiles).
-- TD is read by different models: litho and the painting Backlit view (10% light left at 1 TD),
-  front-lit painting (5% of the background shows), mosaic (5% of background *contrast*). The
-  inconsistency users actually meet is **painting vs mosaic**: both read the *same stored
-  profile TD* through different models (see the color-models doc).
+- TD has two readings, one per kind of filament data: litho presets (Beer–Lambert, ~10% light
+  left at 1 TD) and filament profiles (Kubelka–Munk, 5% of background contrast left at 1 TD),
+  the latter used by every painting and mosaic view since rev. 3 (B5).
 
 - The 2D view buttons are named by role (rev. 3): `data-view="main"` is how the print is meant
-  to be seen, `data-view="alt"` the secondary view; `VIEW_LABELS` in `main.ts` gives the
+  to be seen, `data-view="alt"` the secondary view; `VIEW_LABELS` in `settings.ts` gives the
   per-mode labels (litho Backlit / Unlit, painting Front-lit / Backlit, mosaic Front-lit /
   Swatches).
 
 ## 7. Testing posture
 
-Two test files, 43 tests. `core.test.ts` covers the riskiest math and geometry: solver
+Two test files, 45 tests. `core.test.ts` covers the riskiest math and geometry: solver
 tone mapping, combo budget, manifold closure and volume conservation across modes and
 filament sets, a flat-block triangle-count guard on the greedy mesher, band→material mapping,
 3MF package structure, **CPU vs shader height matching (a statement-for-statement port of

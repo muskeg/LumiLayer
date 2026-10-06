@@ -45,7 +45,7 @@ The pure core (`color`, `mesh`, `threemf`, `imaging`, `paint/{model,km,optics,mo
 
 | Module | Responsibility | Public API (exports) | Invariants / notes |
 | --- | --- | --- | --- |
-| `color.ts` | sRGB↔linear, L\*, Oklab, brightness, `absorption`, `TD_FLOOR` | `Filament`, `RGB`, `hexToRgb`, `rgbToHex`, `srgbToLinear`, `linearToSrgb`, `luminance` (linear), `luma` / `hexLuma` (sRGB), `lightness`, `linearToOklab`, `absorption`, `TD_FLOOR` | the only brightness helpers in the codebase. `hexToRgb` falls back to **white** on bad input; not reachable from the UI today (🟡). `absorption` serves every backlit view. |
+| `color.ts` | sRGB↔linear, L\*, Oklab, brightness, `absorption`, `TD_FLOOR` | `Filament`, `RGB`, `hexToRgb`, `rgbToHex`, `srgbToLinear`, `linearToSrgb`, `luminance` (linear), `luma` / `hexLuma` (sRGB), `lightness`, `linearToOklab`, `absorption`, `TD_FLOOR` | the only brightness helpers in the codebase. `hexToRgb` falls back to **white** on bad input; not reachable from the UI today (🟡). `absorption` is litho-only. |
 | `imaging.ts` | decode, frame/crop/rotate/zoom/pan, brightness/contrast/gamma/saturation | `loadImage`, `demoImage`, `renderFramed`, `adjust`, `sourceAspect`, `panRange`, `Source` | desaturates toward `luma()` (Rec. 709, same as the heightmap). |
 | `lithophane.ts` | litho solver: combo enumeration + 32³ LUT + transmittance tables, per-pixel body thickness | `buildSolver`, `solve`, `targetFor`, `bestCombo`, `colorSlabThickness`, `LithoParams`, `LithoResult`, `LithoGeometry`, `Solver` | closed-form body thickness; Oklab `cbrt(s)` scale trick. |
 | `mesh.ts` | manifold voxel mesher + the three build entry points | `MeshBuilder`, `slabMaterials`, `addBody`, `meshVoxels`, `buildPrintMeshes`, `buildVoxelMeshes`, `buildLayerBandMeshes` | one shared manifold mesher; the single source of the watertight guarantee. |
@@ -53,7 +53,7 @@ The pure core (`color`, `mesh`, `threemf`, `imaging`, `paint/{model,km,optics,mo
 | `download.ts` | safe download trigger + filename | `triggerDownload`, `exportFileName` | filename sanitized; object URL revoked after 10 s (deliberate: revoking immediately can cancel downloads in some browsers). |
 | `paint/model.ts` | profiles, bands, stack resolution, persistence, luminance→layers | `FilamentProfile`, `Band`, `StackLayer`, `resolveStack`, `normalizeStack`, `layersFromLuminance`, `defaultLoadout`, `normalizeLoadout`, `loadProfiles`, … | `FilamentProfile` is the **persisted** filament (id + name + color + td). `sanitizeProfile` is internal (not exported). |
 | `paint/km.ts` | Kubelka–Munk two-flux, TD→scattering | `filamentOptics`, `stackOn`, `TD_CONTRAST`, `FilamentOptics` | stable closed form; log-space bisection. |
-| `paint/optics.ts` | painting Beer–Lambert CPU model + matching | `K_TD`, `CHROMA_WEIGHT`, `MATCH_TIE`, `bandOptics`, `pathLabs`, `targetLab`, `bestLayer` | `K_TD = −ln(0.05)`; **CPU mirror of the shader**, pinned by a differential test. |
+| `paint/optics.ts` | painting CPU model (KM, one layer at a time) + matching | `CHROMA_WEIGHT`, `MATCH_TIE`, `oneLayer`, `bandOptics`, `pathLabs`, `targetLab`, `bestLayer` | `oneLayer` caches each profile's one-layer KM `r`/`t`; **CPU mirror of the shader**, pinned by a differential test. |
 | `paint/mosaic.ts` | combo set, k-d tree, mosaic solve, dither, island merge, voxel output | `ComboSet`, `buildCombos`, `combosFromList`, `KdTree`, `solveMosaic`, `mergeIslands`, `mosaicVoxels`, `renderMosaic`, `mosaicStats`, `MosaicFilament` | `FRAME = −1`, `EMPTY = −2` sentinels; dedupe grid `0.008`. |
 | `paint/swatches.ts` | swatch plate generation | `swatchRows`, `swatchPlate` | top-left notch. |
 | `paint/suggest.ts` | suggest a ≤4-filament stack for an image | `sampleImage`, `suggestStack` | 2-stage: rank sequences then refine tops. |
@@ -63,7 +63,7 @@ The pure core (`color`, `mesh`, `threemf`, `imaging`, `paint/{model,km,optics,mo
 
 | Module | Responsibility | Notes |
 | --- | --- | --- |
-| `paint/preview.ts` | WebGL2 shaders; per-pixel height matching; display + `readLayers` read-back | **source of truth** for painting heights. `K_TD`/`TD_FLOOR`/`MATCH_TIE` interpolated from TS; Backlit view uses `absorption()` (`u_filamentAbs`). Handles `webglcontextlost`/`restored`. |
+| `paint/preview.ts` | WebGL2 shaders; per-pixel height matching; display + `readLayers` read-back | **source of truth** for painting heights. Per-band `u_layerR`/`u_layerT` from `oneLayer`; Front-lit shows KM reflectance, Backlit KM transmittance; `MATCH_TIE` interpolated from TS. Handles `webglcontextlost`/`restored`. |
 | `paint/export.ts` | part builders for all three modes + `packParts` | `buildLithoParts`, `buildPaintingParts`, `buildMosaicParts`, `buildPainting3mf`, `packParts`, `countTriangles`, `MAX_EXPORT_CELLS` (worker-side grid cap), message types. |
 | `paint/threeMfWorker.ts` | dedicated worker; builds every 3MF | paint (transferred heights), mosaic (transferred voxels), litho (copied geometry). Above `confirmAbove` triangles it replies `confirm` and waits for `{ kind: 'write' }`. Exports `ExportRequest`, `WorkerRequest`, `WorkerResponse`, `BuildResponse`. |
 | `paint/exportClient.ts` | main-thread side of the export protocol | `runExport` (send → optional `confirm()` → write), `HEAVY_TRIANGLES = 3 M`; used by `main.ts` and both controllers. |
@@ -106,14 +106,15 @@ belongs to each optical model.
 
 ## 6. Test coverage map
 
-`core.test.ts` (38 tests) and `exportWorker.test.ts` (5 tests) exercise the non-DOM code:
+`core.test.ts` (40 tests) and `exportWorker.test.ts` (5 tests) exercise the non-DOM code:
 
 - solver: enumeration, LUT, `bestCombo`, `targetFor`
 - mesh: manifold closure (edge-pairing + positive signed volume) for the three builders; a flat
   block must mesh to exactly 12 triangles (greedy-merging regression guard)
 - 3MF: package structure (litho via `buildLithoParts` + `write3mfSync`, painting)
 - painting: CPU `pathLabs`/`bestLayer` vs a statement-for-statement port of the shader's
-  `matchLayers` (480 random cases, including a TD below `TD_FLOOR`)
+  `matchLayers` (480 random cases, including a TD below the floor); painting bands vs the same
+  mosaic combo (identical color); one TD of a painting band leaves `TD_CONTRAST`
 - KM: convergence to filament color, translucent filtering, TD contrast
 - mosaic: combo dedupe, `KdTree` nearest-neighbor vs brute force, island merge
 - model: `layersFromLuminance`, `normalizeStack`, `sanitizeProfile`, loadout auto-pick;

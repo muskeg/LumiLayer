@@ -12,10 +12,10 @@ import { runExport, type ExportedFile } from './exportClient';
 import { suggestStack } from './suggest';
 import { AMS_SLOTS, el, isLight } from './ui';
 
-/** What one TD means in each mode's optical model (the profiles, and so the values, are shared). */
+/** What one TD means (painting and mosaic share the profiles and the Kubelka–Munk model). */
 const TD_HELP = {
-  paint: 'after one TD of filament only 5% of the color below still shows (Front-lit view); the Backlit view reads it as ~10% of the light getting through.',
-  mosaic: 'after one TD of filament only 5% of the contrast below still shows, so translucent (high-TD) filaments tint the tiles under them.',
+  paint: 'after one TD of filament only 5% of the contrast below still shows, so translucent (high-TD) filaments tint the bands under them. The Front-lit and Backlit views use the same model as the mosaic.',
+  mosaic: 'after one TD of filament only 5% of the contrast below still shows, so translucent (high-TD) filaments tint the tiles under them. Painting uses the same model.',
 };
 
 export interface PaintSettings {
@@ -131,7 +131,7 @@ export class PaintController {
     }
     // No WebGL: same formulas on the CPU.
     const { minLayers, maxLayers, frameLayers } = this;
-    const path = pathLabs(bandOptics(this.stack(), lh), lh, minLayers, maxLayers);
+    const path = pathLabs(bandOptics(this.stack(), lh), minLayers, maxLayers);
     const lab = [0, 0, 0];
     for (let i = 0; i < n; i++) {
       const a = px[i * 4 + 3];

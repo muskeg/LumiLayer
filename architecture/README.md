@@ -23,6 +23,11 @@ corrected, and the four top findings were fixed — **32/32 tests passing**:
 
 Items that were wrong in the first pass are marked **(corrected)** in place.
 
+**Revision 3:** every plan item except new features and the optional V1 hard triangle cap is
+done — including **B5**: painting now uses the mosaic's Kubelka–Munk model in all its views, so
+one profile TD means one thing everywhere. Lithophane presets keep their own Beer–Lambert model.
+**45/45 tests passing.**
+
 ## Document index
 
 | File | What it covers |
@@ -44,9 +49,9 @@ Items that were wrong in the first pass are marked **(corrected)** in place.
 ## How to read this
 
 - If you only read one file, read **02** — the quality of the whole app hinges on the
-  optics being both physically plausible and numerically stable, and the three print modes
-  deliberately use *different* optical models (one shared model for every backlit view, a
-  hiding model for front-lit painting, Kubelka–Munk for the mosaic).
+  optics being both physically plausible and numerically stable. Since revision 3 there are two
+  models: Beer–Lambert for lithophane presets, Kubelka–Munk for every view of the shared
+  filament profiles (painting and mosaic).
 - The **bug-fixes** and **improvement** documents reference the others; read
   `01` → `02` → `03` first, then the plans.
 

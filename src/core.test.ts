@@ -5,7 +5,7 @@ import { buildPrintMeshes, type Mesh } from './mesh';
 import { buildPainting3mf, buildPaintingParts, materialOfLayers, type PaintExportInput } from './paint/export';
 import { DEFAULT_PROFILES, FRAME_SENTINEL, layersFromLuminance, normalizeStack, resolveStack, type Band, type FilamentProfile, type StackLayer } from './paint/model';
 import { suggestStack } from './paint/suggest';
-import { bandOptics, bestLayer, CHROMA_WEIGHT, K_TD, MATCH_TIE, pathLabs, targetLab } from './paint/optics';
+import { bandOptics, bestLayer, CHROMA_WEIGHT, MATCH_TIE, oneLayer, pathLabs, targetLab } from './paint/optics';
 import { write3mfSync } from './threemf';
 import { filamentOptics, stackOn, TD_CONTRAST } from './paint/km';
 import {
@@ -17,7 +17,7 @@ import { swatchPlate, swatchRows } from './paint/swatches';
 import { defaultLoadout, normalizeLoadout } from './paint/model';
 import { gamutError, pickLoadout } from './paint/loadout';
 import { sampleImage } from './paint/suggest';
-import { hexLuma, hexToRgb, linearToOklab, luma, luminance, srgbToLinear, TD_FLOOR } from './color';
+import { hexLuma, linearToOklab, luma, luminance, srgbToLinear } from './color';
 import { adjust, panRange, sourceAspect, type Source } from './imaging';
 import { isLight } from './paint/ui';
 import { frameGrid, MAX_PIXELS } from './settings';
@@ -283,7 +283,8 @@ describe('stack suggestion', () => {
     expect(new Set(names).size).toBeLessThanOrEqual(4);
     expect(names.some((n) => ['Red', 'Orange', 'Magenta', 'Brown'].includes(n))).toBe(true);
     expect(['Black', 'Charcoal', 'Brown']).toContain(names[0]);
-    expect(['White', 'Ivory']).toContain(names[names.length - 1]);
+    // Order above the dark base is the optimizer's call: translucent red over white prints a cleaner red than white over red.
+    expect(names.some((n) => ['White', 'Ivory'].includes(n))).toBe(true);
     for (let i = 1; i < bands.length; i++) expect(bands[i].top).toBeGreaterThan(bands[i - 1].top);
     expect(bands[bands.length - 1].top).toBeLessThanOrEqual(80);
     expect((await suggestStack({ ...base, srgb: image(300) })).bands).toEqual(bands);
@@ -291,7 +292,7 @@ describe('stack suggestion', () => {
 
   it('color-match heights put each color at the height that prints it', () => {
     const stack = resolveStack(bands3, DEFAULT_PROFILES, 0.08);
-    const path = pathLabs(bandOptics(stack, 0.08), 0.08, 1, 30);
+    const path = pathLabs(bandOptics(stack, 0.08), 1, 30);
     const at = (r: number, g: number, b: number) => {
       const t = [0, 0, 0];
       targetLab(r, g, b, t);
@@ -314,28 +315,28 @@ describe('stack suggestion', () => {
     };
     const target = lab(srgb.map(srgbToLinear));
     let best = minL, bestErr = 1e9;
-    let below = [0, 0, 0];
+    const below = [0, 0, 0];
     for (const l of stack) {
       const s = Math.floor(l.startZ / lh + 0.5), e = Math.floor(l.endZ / lh + 0.5);
-      const col = hexToRgb(l.colorHex).map(srgbToLinear);
-      const k = (K_TD / Math.max(l.td, TD_FLOOR)) * lh;
-      const mix = (t: number) => col.map((c, ch) => c + (below[ch] - c) * t);
-      for (let h = Math.max(s + 1, minL); h <= Math.min(e, maxL); h++) {
-        const d = lab(mix(Math.exp(-k * (h - s)))).map((v, ch) => v - target[ch]);
+      // The u_layerR / u_layerT uniforms the preview uploads for this band.
+      const { r, t } = oneLayer(l.colorHex, l.td, lh);
+      for (let h = s + 1; h <= e; h++) {
+        for (let ch = 0; ch < 3; ch++) below[ch] = r[ch] + (t[ch] * t[ch] * below[ch]) / (1 - r[ch] * below[ch]);
+        if (h < minL || h > maxL) continue;
+        const d = lab(below).map((v, ch) => v - target[ch]);
         const err = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
         if (err < bestErr - MATCH_TIE) {
           bestErr = err;
           best = h;
         }
       }
-      below = mix(Math.exp(-k * (e - s)));
     }
     return best;
   }
 
   it('CPU height matching picks the same layer as the preview shader', () => {
     const lh = 0.08;
-    // Includes a TD below TD_FLOOR so both paths must clamp it the same way.
+    // Includes a TD below the floor so both paths must clamp it the same way.
     const profiles = [...DEFAULT_PROFILES, { id: 'thin', name: 'Thin', color: '#2040c0', td: 0.01 }];
     let s = 7;
     const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
@@ -346,7 +347,7 @@ describe('stack suggestion', () => {
       const stack = resolveStack(normalizeStack(bands, profiles), profiles, lh);
       const maxL = Math.round(stack[stack.length - 1].endZ / lh);
       const minL = 1 + (trial % 3);
-      const path = pathLabs(bandOptics(stack, lh), lh, minL, maxL);
+      const path = pathLabs(bandOptics(stack, lh), minL, maxL);
       for (let p = 0; p < 40; p++) {
         const px = [rnd(), rnd(), rnd()];
         const t = [0, 0, 0];
@@ -427,6 +428,42 @@ describe('3mf', () => {
     const xml = strFromU8(files['3D/3dmodel.model']);
     expect(xml.match(/<component /g)?.length).toBe(parts.length);
     expect(xml).toContain('<build>');
+  });
+});
+
+describe('one TD, one model (painting = mosaic)', () => {
+  const lh = 0.08;
+  const red = DEFAULT_PROFILES.find((p) => p.id === 'red')!;
+  const black = DEFAULT_PROFILES.find((p) => p.id === 'black')!;
+
+  it('painting bands print the same color as the same mosaic combo', () => {
+    const stack = resolveStack([{ filamentId: 'black', top: 6 }, { filamentId: 'red', top: 14 }], DEFAULT_PROFILES, lh);
+    const path = pathLabs(bandOptics(stack, lh), 1, 14);
+    const fb = filamentOptics(black.color, black.td, lh, 20), fr = filamentOptics(red.color, red.td, lh, 20);
+    const cw = Math.sqrt(CHROMA_WEIGHT);
+    for (let h = 7; h <= 14; h++) {
+      const c = [0, 0, 0];
+      stackOn(fb, 6, c);
+      stackOn(fr, h - 6, c);
+      const lab = [0, 0, 0];
+      linearToOklab(c[0], c[1], c[2], lab);
+      const o = (h - 1) * 3;
+      expect(path[o]).toBeCloseTo(lab[0], 4);
+      expect(path[o + 1]).toBeCloseTo(lab[1] * cw, 4);
+      expect(path[o + 2]).toBeCloseTo(lab[2] * cw, 4);
+    }
+  });
+
+  it('one TD of a painting band leaves TD_CONTRAST of the background, like the mosaic', () => {
+    const { r, t } = oneLayer(red.color, red.td, lh);
+    const over = (bg: number) => {
+      const c = [bg, bg, bg];
+      for (let k = 0; k < Math.round(red.td / lh); k++)
+        for (let ch = 0; ch < 3; ch++) c[ch] = r[ch] + (t[ch] * t[ch] * c[ch]) / (1 - r[ch] * c[ch]);
+      return c;
+    };
+    const w = over(1), b = over(0);
+    expect(Math.max(...w.map((v, ch) => v - b[ch]))).toBeCloseTo(TD_CONTRAST, 3);
   });
 });
 

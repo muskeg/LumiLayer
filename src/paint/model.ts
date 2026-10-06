@@ -6,7 +6,7 @@ export interface FilamentProfile {
   name: string;
   /** sRGB hex, e.g. "#c8102e". */
   color: string;
-  /** Transmission distance (mm): thickness after which only 5% of light gets through. */
+  /** Transmission distance (mm): after this thickness only 5% of the contrast below still shows (TD_CONTRAST, paint/km.ts). */
   td: number;
 }
 
