@@ -1,3 +1,5 @@
+import { hexToRgb, luma } from '../color';
+
 /** A user filament profile, persisted in localStorage. */
 export interface FilamentProfile {
   id: string;
@@ -135,9 +137,8 @@ export function normalizeLoadout(ids: unknown, profiles: FilamentProfile[], slot
 /** Darkest profile as the ground, then the lightest, then the most saturated ones. */
 export function defaultLoadout(profiles: FilamentProfile[], slots: number): string[] {
   const stats = profiles.map((p) => {
-    const n = parseInt(p.color.slice(1), 16);
-    const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
-    return { id: p.id, luma: lumaOf(r, g, b), chroma: Math.max(r, g, b) - Math.min(r, g, b) };
+    const [r, g, b] = hexToRgb(p.color);
+    return { id: p.id, luma: luma(r, g, b), chroma: Math.max(r, g, b) - Math.min(r, g, b) };
   });
   const dark = stats.reduce((a, b) => (b.luma < a.luma ? b : a));
   const light = stats.filter((s) => s !== dark).reduce<(typeof stats)[number] | null>((a, b) => (!a || b.luma > a.luma ? b : a), null);
@@ -148,9 +149,6 @@ export function defaultLoadout(profiles: FilamentProfile[], slots: number): stri
 export const restoreLoadout = (profiles: FilamentProfile[], slots: number) => normalizeLoadout(readJson(LOADOUT_KEY), profiles, slots);
 
 export const storeLoadout = (ids: string[]) => writeJson(LOADOUT_KEY, ids);
-
-/** Brightness used for the heightmap (Rec. 709 weights on sRGB values, like a standard grayscale conversion). */
-export const lumaOf = (r: number, g: number, b: number) => Math.min(1, Math.max(0, 0.2126 * r + 0.7152 * g + 0.0722 * b));
 
 /**
  * Printed height of a pixel in whole layers (round half up). The preview shader uses the identical

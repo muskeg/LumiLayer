@@ -21,7 +21,7 @@ paint/swatches ────────────────► paint/mosaic
 paint/mosaic ─────────────────► paint/km, paint/optics, color
 paint/optics ─────────────────► paint/model(type), color
 paint/km ─────────────────────► color
-paint/model ──────────────────► (none)  [lumaOf is defined here]
+paint/model ──────────────────► color (hexToRgb, luma)
 mesh ─────────────────────────► lithophane(type)
 threemf ──────────────────────► fflate, mesh(type)  [pure packaging]
 preview3d ────────────────────► three, mesh
@@ -40,13 +40,13 @@ The pure core (`color`, `mesh`, `threemf`, `imaging`, `paint/{model,km,optics,mo
 
 | Module | Responsibility | Public API (exports) | Invariants / notes |
 | --- | --- | --- | --- |
-| `color.ts` | sRGB↔linear, L\*, Oklab, Rec.709 luminance, `absorption`, `TD_FLOOR` | `Filament`, `RGB`, `hexToRgb`, `rgbToHex`, `srgbToLinear`, `linearToSrgb`, `luminance`, `lightness`, `linearToOklab`, `absorption`, `TD_FLOOR` | `hexToRgb` falls back to **white** on bad input; not reachable from the UI today (🟡). `absorption` serves every backlit view. |
-| `imaging.ts` | decode, frame/crop/rotate/zoom/pan, brightness/contrast/gamma/saturation | `loadImage`, `demoImage`, `renderFramed`, `adjust`, `sourceAspect`, `panRange`, `Source` | saturation axis uses **BT.601** luma (`0.299/…`), others use Rec.709 (🟡). |
+| `color.ts` | sRGB↔linear, L\*, Oklab, brightness, `absorption`, `TD_FLOOR` | `Filament`, `RGB`, `hexToRgb`, `rgbToHex`, `srgbToLinear`, `linearToSrgb`, `luminance` (linear), `luma` / `hexLuma` (sRGB), `lightness`, `linearToOklab`, `absorption`, `TD_FLOOR` | the only brightness helpers in the codebase. `hexToRgb` falls back to **white** on bad input; not reachable from the UI today (🟡). `absorption` serves every backlit view. |
+| `imaging.ts` | decode, frame/crop/rotate/zoom/pan, brightness/contrast/gamma/saturation | `loadImage`, `demoImage`, `renderFramed`, `adjust`, `sourceAspect`, `panRange`, `Source` | desaturates toward `luma()` (Rec. 709, same as the heightmap). |
 | `lithophane.ts` | litho solver: combo enumeration + 32³ LUT + transmittance tables, per-pixel body thickness | `buildSolver`, `solve`, `targetFor`, `bestCombo`, `colorSlabThickness`, `LithoParams`, `LithoResult`, `LithoGeometry`, `Solver` | closed-form body thickness; Oklab `cbrt(s)` scale trick. |
 | `mesh.ts` | manifold voxel mesher + the three build entry points | `MeshBuilder`, `slabMaterials`, `addBody`, `meshVoxels`, `buildPrintMeshes`, `buildVoxelMeshes`, `buildLayerBandMeshes` | one shared manifold mesher; the single source of the watertight guarantee. |
 | `threemf.ts` | 3MF package assembly (XML + zip) | `XmlWriter`, `buildModelXml`, `write3mfSync`, `Part` | XML is escaped; streamed in ~1 MB chunks. Sync only (async fflate `zip` removed: it needs `blob:` workers). |
 | `download.ts` | safe download trigger + filename | `triggerDownload`, `exportFileName` | filename sanitized; object URL revoked after 10 s (deliberate: revoking immediately can cancel downloads in some browsers). |
-| `paint/model.ts` | profiles, bands, stack resolution, persistence, luminance→layers | `FilamentProfile`, `Band`, `StackLayer`, `resolveStack`, `normalizeStack`, `lumaOf`, `layersFromLuminance`, `defaultLoadout`, `normalizeLoadout`, `loadProfiles`, … | `FilamentProfile` is the **persisted** filament (id + name + color + td). `sanitizeProfile` is internal (not exported). |
+| `paint/model.ts` | profiles, bands, stack resolution, persistence, luminance→layers | `FilamentProfile`, `Band`, `StackLayer`, `resolveStack`, `normalizeStack`, `layersFromLuminance`, `defaultLoadout`, `normalizeLoadout`, `loadProfiles`, … | `FilamentProfile` is the **persisted** filament (id + name + color + td). `sanitizeProfile` is internal (not exported). |
 | `paint/km.ts` | Kubelka–Munk two-flux, TD→scattering | `filamentOptics`, `stackOn`, `TD_CONTRAST`, `FilamentOptics` | stable closed form; log-space bisection. |
 | `paint/optics.ts` | painting Beer–Lambert CPU model + matching | `K_TD`, `CHROMA_WEIGHT`, `MATCH_TIE`, `bandOptics`, `pathLabs`, `targetLab`, `bestLayer` | `K_TD = −ln(0.05)`; **CPU mirror of the shader**, pinned by a differential test. |
 | `paint/mosaic.ts` | combo set, k-d tree, mosaic solve, dither, island merge, voxel output | `ComboSet`, `buildCombos`, `combosFromList`, `KdTree`, `solveMosaic`, `mergeIslands`, `mosaicVoxels`, `renderMosaic`, `mosaicStats`, `MosaicFilament` | `FRAME = −1`, `EMPTY = −2` sentinels; dedupe grid `0.008`. |
@@ -98,7 +98,7 @@ belongs to each optical model.
 
 ## 6. Test coverage map
 
-`core.test.ts` (33 tests) exercises the pure core only:
+`core.test.ts` (36 tests) exercises the pure core only:
 
 - solver: enumeration, LUT, `bestCombo`, `targetFor`
 - mesh: manifold closure (edge-pairing + positive signed volume) for the three builders
@@ -111,5 +111,4 @@ belongs to each optical model.
 
 **Not covered:** the framing/adjust path (`imaging`), the 2D preview, the worker message
 protocol (incl. the litho confirm round-trip — verified manually in the browser),
-`suggest.ts`/`loadout.ts` end-to-end quality (only invariants), and the
-`lumaOf`/`luminance`/BT.601 luma helpers. (improvement-plan)
+`suggest.ts`/`loadout.ts` end-to-end quality (only invariants). (improvement-plan)

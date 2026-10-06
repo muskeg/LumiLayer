@@ -66,49 +66,21 @@ asserting it throws on a bad color.
 ---
 
 ## B3 — `imaging.adjust` saturation uses BT.601 luma, everywhere else uses Rec.709
-🟡
+✅ fixed (rev. 3)
 
-**Symptom:** Desaturating a pixel by `saturation = 0` (or any value) moves it toward a luma
-computed with BT.601 weights (`0.299/0.587/0.114`), while the litho solver, the painting
-alpha channel, and the mosaic luma all use Rec.709 (`0.2126/0.7152/0.0722`). The difference is
-small (a few luma points in the mid-tones) but is another instance of "brightness" being
-defined three ways across the codebase.
-
-**Root cause:** copy-paste from the classic 0.299/0.587/0.114 grayscale recipe.
-
-**Fix:** introduce a single `luma(r,g,b)` helper in `color.ts` (Rec.709, on sRGB values,
-clamped to 0..1) and use it in `imaging.adjust`, `paint/model.ts` (`lumaOf`), and the
-`isLight` / `swatches` luminance thresholds. Keep `luminance` (Rec.709 on **linear** values)
-as a distinct, well-named function for the litho path. A one-line comment in each should make
-the sRGB-vs-linear distinction explicit.
-
-**Test:** a unit test that `luma` and the inlined 0.299 expression agree on a small grid of
-samples (so the change is provably the *only* behavioral difference), then delete the inlined
-version.
+`adjust` now desaturates toward `luma()` from `color.ts` (Rec. 709 on sRGB). Tested:
+`saturation = 0` gives exactly the gray the heightmap reads. (The first pass's proposed test —
+that the 0.299 and Rec. 709 expressions "agree" — could not pass: they differ by design.)
 
 ---
 
 ## B4 — `lumaOf` vs `luminance`: same Rec.709 weights, different input domain
-🟡 (not a crash; a consistency gap)
+✅ fixed (rev. 3)
 
-**Symptom:** For the *same* input pixel (r,g,b in 0..1), `lumaOf` (paint/mosaic) and
-`luminance` (litho) return **different numbers**: `lumaOf` applies the weights to sRGB values
-while `luminance` applies them to values that the litho path linearizes first (see
-`lithophane.ts:80-81`). This is defensible — Rec.709 on gamma values is the classic
-"grayscale" recipe — but it means "brightness of pixel X" has two answers in this codebase,
-and the "darkest/lightest filament" heuristics (in `defaultLoadout`, `swatchRows`) and the
-`layersFromLuminance` path all use the gamma-space luma.
-
-**Root cause:** two independently written helpers that happen to share weights.
-
-**Fix:** fold into the B3 consolidation: one `luma()` (sRGB-domain) and one
-`luminance()` (linear-domain), both exported from `color.ts`, with a doc comment on each
-stating the domain. Replace every inlined expression.
-
-**Test:** after the refactor, a snapshot test that the litho `targetFor` output is
-byte-identical to today's (it should be — the linear-domain path is unchanged), and that the
-painting/mosaic `lumaOf` output is byte-identical to today's (it should be — the sRGB-domain
-path is unchanged). The point is to *prove* no behavior change, only consolidation.
+`color.ts` exports `luminance()` (linear domain, litho) and `luma()` / `hexLuma()` (sRGB
+domain), each documented with its domain. `lumaOf` and the inlined copies in `isLight`,
+`swatches.ts` and `defaultLoadout` are gone; their outputs are unchanged (same weights, same
+domain; the `isLight` threshold stays 140/255, tested).
 
 ---
 
@@ -221,8 +193,8 @@ throughout.
 | --- | --- | --- | --- |
 | B1 | 🟠 | Two independent Beer–Lambert implementations (GPU + CPU) could diverge; no test pinned them. | ✅ fixed |
 | B2 | 🟡 | Litho path does not validate filament color (not reachable from the UI). | open, low |
-| B3 | 🟡 | `imaging.adjust` saturation uses BT.601 luma; others use Rec.709. | open |
-| B4 | 🟡 | `lumaOf` (sRGB) vs `luminance` (linear) — same weights, different domain. | open |
+| B3 | 🟡 | `imaging.adjust` saturation used BT.601 luma; others Rec.709. | ✅ fixed |
+| B4 | 🟡 | `lumaOf` (sRGB) vs `luminance` (linear) — same weights, different domain. | ✅ fixed |
 | B5 | 🟠 | TD meaning differs by model; painting vs mosaic share stored TDs. | open (UX/model) |
 | B6 | 🟠 | Two `hexToRgb` with different fallbacks. | ✅ fixed |
 | B7 | ✅ | `adjust` clamping — verified OK, no change. | closed |
@@ -233,5 +205,5 @@ throughout.
 | B12 | 🟡 | TD floor 0.05 (CPU) vs 1e-3 (GPU). | ✅ fixed |
 | B13 | 🔴 | Litho `confirm` came after the main-thread mesh build. | ✅ fixed |
 
-**Suggested order of remaining work:** B3 + B4 (one luma consolidation pass), then B5
+**Suggested order of remaining work:** B5
 (UX/model), B2 only if litho filaments become importable.

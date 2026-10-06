@@ -1,3 +1,5 @@
+import { luma } from './color';
+
 export interface Framing {
   zoom: number;
   panX: number;
@@ -102,7 +104,7 @@ export function adjust(rgba: Uint8ClampedArray, a: Adjust): Float32Array {
   const clamp = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
   for (let i = 0; i < n; i++) {
     let r = rgba[i * 4] / 255, g = rgba[i * 4 + 1] / 255, b = rgba[i * 4 + 2] / 255;
-    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    const y = luma(r, g, b);
     r = y + (r - y) * a.saturation;
     g = y + (g - y) * a.saturation;
     b = y + (b - y) * a.saturation;

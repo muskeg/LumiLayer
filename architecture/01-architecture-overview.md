@@ -229,7 +229,7 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
 
 ## 7. Testing posture
 
-A single, dense `core.test.ts` (33 tests) covers the riskiest math and geometry: solver
+A single, dense `core.test.ts` (36 tests) covers the riskiest math and geometry: solver
 tone mapping, combo budget, manifold closure and volume conservation across modes and
 filament sets, band→material mapping, 3MF package structure, **CPU vs shader height matching
 (a statement-for-statement port of `matchLayers`)**, KM convergence and TD contrast,

@@ -23,7 +23,13 @@ export const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow(
 export const linearToSrgb = (c: number) =>
   c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 
+/** Relative luminance of *linear* RGB (Rec. 709 weights): the physical quantity the litho solver uses. */
 export const luminance = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/** Rec. 709 weights on *gamma-encoded* sRGB (0..1), clamped: grayscale brightness for heightmaps, saturation and light/dark tests. */
+export const luma = (r: number, g: number, b: number) => Math.min(1, Math.max(0, 0.2126 * r + 0.7152 * g + 0.0722 * b));
+
+export const hexLuma = (hex: string) => luma(...hexToRgb(hex));
 
 /** CIE L* scaled to 0..1 from relative luminance. */
 export function lightness(y: number): number {

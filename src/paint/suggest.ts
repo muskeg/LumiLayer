@@ -1,4 +1,5 @@
-import { layersFromLuminance, lumaOf, MAX_LAYERS, type Band, type FilamentProfile } from './model';
+import { luma } from '../color';
+import { layersFromLuminance, MAX_LAYERS, type Band, type FilamentProfile } from './model';
 import { bandOptics, pathLabs, targetLab, type HeightMode } from './optics';
 
 export interface SuggestInput {
@@ -63,7 +64,7 @@ export function sampleImage(srgb: Float32Array, invert: boolean): Samples {
     const c = acc[bin * 4 + 3];
     const r = acc[bin * 4] / c, g = acc[bin * 4 + 1] / c, b = acc[bin * 4 + 2] / c;
     targetLab(r, g, b, lab, i * 3);
-    const v = lumaOf(r, g, b);
+    const v = luma(r, g, b);
     lum[i] = invert ? 1 - v : v;
     weight[i] = c;
     total += c;

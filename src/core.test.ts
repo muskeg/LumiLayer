@@ -17,7 +17,9 @@ import { swatchPlate, swatchRows } from './paint/swatches';
 import { defaultLoadout, normalizeLoadout } from './paint/model';
 import { gamutError, pickLoadout } from './paint/loadout';
 import { sampleImage } from './paint/suggest';
-import { hexToRgb, linearToOklab, srgbToLinear, TD_FLOOR } from './color';
+import { hexLuma, hexToRgb, linearToOklab, luma, luminance, srgbToLinear, TD_FLOOR } from './color';
+import { adjust } from './imaging';
+import { isLight } from './paint/controller';
 
 const params = (over: Partial<LithoParams> = {}): LithoParams => ({
   pixelMm: 0.5,
@@ -340,6 +342,30 @@ describe('stack suggestion', () => {
     const { bands } = await suggestStack({ ...base, srgb: image(300) });
     const ids = new Set(bands.map((b) => b.filamentId));
     expect(ids.has('white') && ids.has('ivory')).toBe(false);
+  });
+});
+
+describe('brightness', () => {
+  it('luma works on sRGB values, luminance on linear values', () => {
+    expect(luma(0.5, 0.5, 0.5)).toBeCloseTo(0.5, 6);
+    const lin = srgbToLinear(0.5);
+    expect(luminance(lin, lin, lin)).toBeCloseTo(lin, 6);
+    expect(luma(2, 2, 2)).toBe(1);
+  });
+
+  it('desaturates toward the same luma the heightmap uses', () => {
+    const px = new Uint8ClampedArray([200, 40, 90, 255, 10, 220, 60, 255]);
+    const out = adjust(px, { brightness: 0, contrast: 0, gamma: 1, saturation: 0 });
+    for (let i = 0; i < 2; i++) {
+      const y = luma(px[i * 4] / 255, px[i * 4 + 1] / 255, px[i * 4 + 2] / 255);
+      for (let c = 0; c < 3; c++) expect(out[i * 3 + c]).toBeCloseTo(y, 5);
+    }
+  });
+
+  it('keeps the light/dark threshold at 140/255', () => {
+    expect(isLight('#8c8c8c')).toBe(false);
+    expect(isLight('#8d8d8d')).toBe(true);
+    expect(hexLuma('#ffffff')).toBe(1);
   });
 });
 

@@ -1,8 +1,9 @@
+import { hexLuma, luma } from '../color';
 import { exportFileName, triggerDownload } from '../download';
 import type { PaintExportInput } from './export';
 import {
   DEFAULT_PROFILES, FRAME_SENTINEL, MAX_BANDS, MAX_LAYERS, TD_MAX, TD_MIN,
-  layersFromLuminance, loadProfiles, loadStack, lumaOf, newProfileId, normalizeStack, resolveStack, saveProfiles, saveStack,
+  layersFromLuminance, loadProfiles, loadStack, newProfileId, normalizeStack, resolveStack, saveProfiles, saveStack,
   type Band, type FilamentProfile, type StackLayer,
 } from './model';
 import { PaintPreview, type OpticalMode } from './preview';
@@ -110,7 +111,7 @@ export class PaintController {
       for (let x = 0; x < imgCols; x++) {
         const s = (y * imgCols + x) * 3;
         const o = ((y + border) * cols + x + border) * 4;
-        const v = lumaOf(srgb[s], srgb[s + 1], srgb[s + 2]);
+        const v = luma(srgb[s], srgb[s + 1], srgb[s + 2]);
         px[o] = srgb[s];
         px[o + 1] = srgb[s + 1];
         px[o + 2] = srgb[s + 2];
@@ -412,7 +413,4 @@ function bandLabel(start: number, top: number, lh: number) {
   return `${(start * lh).toFixed(2)}–${(top * lh).toFixed(2)} mm`;
 }
 
-export function isLight(hex: string) {
-  const n = parseInt(hex.slice(1), 16);
-  return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255) > 140;
-}
+export const isLight = (hex: string) => hexLuma(hex) > 140 / 255;

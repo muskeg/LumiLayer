@@ -226,17 +226,12 @@ finds the true nearest neighbor against brute force for random points. Good.
   `<input type="color">` (always `#rrggbb`), and stored profiles are validated by
   `sanitizeProfile`. The duplicate parser in `preview.ts` that fell back to *black* was removed
   in revision 2.
-- **`lumaOf` vs `luminance`**: both use the Rec. 709 weights `0.2126/0.7152/0.0722`, but
-  `lumaOf` (painting/mosaic) is applied to the *adjusted sRGB* floats while the litho
-  `luminance` is applied to *linear* values. This is a defensible choice (Rec. 709 on gamma
-  values is the classic "grayscale conversion"), but it means the same input pixel yields a
-  slightly different brightness in the two code paths, and the "darkest/lightest filament"
-  heuristics (`defaultLoadout`, `swatchRows`) also use gamma-space luma. Not a correctness
-  bug, but an inconsistency worth a shared helper and a one-line comment (see improvement plan).
-- **`imaging.adjust` saturation uses BT.601 luma** (`0.299/0.587/0.114`) for its desaturation
-  axis, while everything else uses Rec. 709 (`0.2126/0.7152/0.0722`). The difference is small
-  but is another place where "brightness" is defined three slightly different ways across the
-  codebase. Consolidating these into one `luma()` helper would remove the ambiguity.
+- **Brightness helpers (fixed in rev. 3):** `color.ts` now has exactly two — `luminance()`
+  (Rec. 709 on *linear* values; the litho solver) and `luma()` / `hexLuma()` (Rec. 709 on
+  *gamma-encoded* sRGB, clamped; the painting/mosaic heightmap, `imaging.adjust` saturation,
+  `defaultLoadout`, `swatchRows`, `isLight`). The inlined copies and `lumaOf` are gone. The one
+  behavior change: desaturation used BT.601 (`0.299/0.587/0.114`) and now uses Rec. 709, so
+  `saturation = 0` lands on the same gray the heightmap reads.
 - **Chroma weight mismatch:** painting/mosaic use `CHROMA_WEIGHT = 2` (a²+b² scaled by 2),
   litho uses `colorPriority` (default 1). Not a bug, but the "color match" feel differs
   between modes for the same photo — worth documenting.

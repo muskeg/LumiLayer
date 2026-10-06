@@ -1,3 +1,4 @@
+import { hexLuma } from '../color';
 import { EMPTY, FRAME, type MosaicResult, type ComboSet } from './mosaic';
 
 /**
@@ -20,16 +21,11 @@ const THICKNESSES = [1, 2, 3, 5];
 /** Layers of the lightest filament laid under tints. */
 const UNDERLAY = 6;
 
-const luma = (hex: string) => {
-  const n = parseInt(hex.slice(1), 16);
-  return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255);
-};
-
 /** Rows for a loadout (slot 0 = ground): lightest filament ramp, each tint on the ground and on the lightest, then layered pairs. */
 export function swatchRows(filaments: { name: string; color: string }[]): SwatchRow[] {
   if (filaments.length < 2) return [];
   const others = filaments.map((_, i) => i).slice(1);
-  const w = others.reduce((a, b) => (luma(filaments[b].color) > luma(filaments[a].color) ? b : a));
+  const w = others.reduce((a, b) => (hexLuma(filaments[b].color) > hexLuma(filaments[a].color) ? b : a));
   const tints = others.filter((i) => i !== w);
   const rows: SwatchRow[] = [
     { label: `${filaments[w].name} ramp: 1–${PER_ROW} layers`, swatches: Array.from({ length: PER_ROW }, (_, t) => [[w, t + 1]]) },

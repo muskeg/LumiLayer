@@ -61,7 +61,7 @@ export, and viewer. Natural seams, all mechanical:
 **Benefit:** each concern is independently testable (the framing and settings logic today has
 zero tests because they're entangled with the DOM).
 
-**Effort:** M (pure refactor, no behavior change — protect with the existing 32 tests + a couple
+**Effort:** M (pure refactor, no behavior change — protect with the existing 36 tests + a couple
 of new settings/framing tests).
 
 ---
@@ -82,10 +82,9 @@ hidden dependency; easier to test and to evolve separately.
 ---
 
 ### I6 — Add the missing tests 🟠
-`core.test.ts` (32 tests) covers the pure core well, but these pure/testable paths have none:
+`core.test.ts` (36 tests) covers the pure core well, but these pure/testable paths have none:
 
-- `imaging.ts` — `adjust` (incl. the BT.601 → Rec.709 change from B3) and `renderFramed`
-  crop/rotate/zoom math.
+- `imaging.ts` — `renderFramed` crop/rotate/zoom math (`adjust` desaturation is now tested).
 - `suggest.ts` / `loadout.ts` — invariant tests (e.g. suggested stack is ≤ `AMS_SLOTS` filaments,
   bands partition the height, auto-pick is deterministic for a fixed image).
 - `mesh.ts` — the three builders already have manifold tests; add a *size/perf* guard (a small
@@ -101,13 +100,10 @@ hidden dependency; easier to test and to evolve separately.
 
 ## P2 — polish / DX
 
-### I7 — Unify "brightness" into one documented `luma`/`luminance` pair 🟡 (fixes B3/B4)
-Introduce `luma()` (Rec.709 on sRGB values) and `luminance()` (Rec.709 on linear values) in
-`color.ts`, with a one-line comment on each stating the domain. Replace the inlined
-`0.299/0.587/0.114` in `imaging.adjust` and the duplicated `0.2126/…` in `lumaOf`, `isLight`,
-and `swatches`. A snapshot test proves no behavior change.
-
-**Effort:** S.
+### I7 — Unify "brightness" into one documented `luma`/`luminance` pair ✅ done (rev. 3, fixes B3/B4)
+`color.ts` exports `luminance()` (linear) and `luma()` / `hexLuma()` (sRGB), each documented
+with its domain; every inlined copy and `lumaOf` were replaced. Tests cover the domains,
+desaturation and the `isLight` threshold.
 
 ---
 
@@ -152,7 +148,7 @@ tinting. The panel also says the profiles are shared by both modes. The litho le
 | I4 | 🟠 | Split `main.ts` | open |
 | I5 | 🟠 | Break `mosaicController → controller` coupling | open |
 | I2 | 🟡 | Alias `MosaicFilament` (no `tdConvention`) | open |
-| I7 | 🟡 | Unify `luma`/`luminance` (fix B3/B4) | open |
+| I7 | 🟡 | Unify `luma`/`luminance` (fix B3/B4) | ✅ done |
 | I10 | 🟡 | TD-meaning tooltips | ✅ done |
 
-**Suggested order:** I6 first so the P1 refactors (I4, I5) are protected, then I7, I2.
+**Suggested order:** I6 first so the P1 refactors (I4, I5) are protected, then I2.
