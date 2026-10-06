@@ -164,7 +164,7 @@ export class PaintController {
   async exportModel(title: string): Promise<ExportedFile | null> {
     const input = this.exportInput(title);
     this.worker ??= new Worker(new URL('./threeMfWorker.ts', import.meta.url), { type: 'module' });
-    const file = await runExport(this.worker, input, [input.heights.buffer], 'increase Pixel size or lower the top band', this.onStatus);
+    const file = await runExport(this.worker, input, [input.heights.buffer], ['Increase Pixel size', 'Lower the top band of the stack'], this.onStatus);
     if (file) triggerDownload(new Blob([file.bytes], { type: 'model/3mf' }), exportFileName(title, 'painting'));
     return file;
   }

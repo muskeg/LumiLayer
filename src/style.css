@@ -646,7 +646,7 @@ input[type='color']::-moz-color-swatch {
   position: relative;
   min-height: 0;
   margin: 0 14px;
-  padding: 18px;
+  padding: 30px;
   border-radius: 12px;
   border: 1px solid var(--line);
   overflow: hidden;
@@ -877,6 +877,315 @@ footer .hint {
   height: 28px;
 }
 
+/* ---------- workflow steps ---------- */
+
+.step-num {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 650;
+  background: var(--bg-3);
+  color: var(--text-2);
+}
+
+details.step[open] > summary .step-num {
+  background: var(--glow);
+  color: var(--glow-ink);
+}
+
+.step-title {
+  white-space: nowrap;
+}
+
+.step-sum {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.step-sum:empty {
+  display: none;
+}
+
+summary .step-sum + * {
+  margin-left: 0;
+}
+
+/* With a summary present, the chevron sits right after it. */
+details.step > summary::after {
+  margin-left: 4px;
+}
+
+details.step > summary:has(.step-sum:empty)::after {
+  margin-left: auto;
+}
+
+details.advanced {
+  border: 0;
+  padding: 0;
+  margin-top: 8px;
+}
+
+details.advanced > summary {
+  height: 28px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+details.advanced > summary::after {
+  margin-left: 6px;
+  width: 5px;
+  height: 5px;
+}
+
+details.advanced > summary:hover {
+  color: var(--text-2);
+}
+
+/* Segmented control inside a setting row. */
+.row.segmented {
+  grid-template-columns: 104px 1fr;
+}
+
+.row.segmented > output {
+  display: none;
+}
+
+.seg.full {
+  display: flex;
+}
+
+.seg.full button {
+  flex: 1;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+/* ---------- canvas extras ---------- */
+
+.ruler {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.ruler.x {
+  height: 14px;
+}
+
+.ruler.y {
+  width: 14px;
+  flex-direction: column;
+}
+
+.ruler::before,
+.ruler::after {
+  content: '';
+  flex: 1;
+  background: var(--line-2);
+}
+
+.ruler.x::before,
+.ruler.x::after {
+  height: 1px;
+}
+
+.ruler.y::before,
+.ruler.y::after {
+  width: 1px;
+}
+
+.ruler.y span {
+  writing-mode: vertical-rl;
+}
+
+/* Thin sweeping bar while an export runs. */
+#stage.busy::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 30%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--glow), transparent);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from { translate: -100% 0; }
+  to { translate: 340% 0; }
+}
+
+/* ---------- dialog and toasts ---------- */
+
+dialog.dialog {
+  width: min(460px, calc(100vw - 32px));
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--text);
+  box-shadow: 0 30px 90px rgb(0 0 0 / 0.6);
+}
+
+dialog.dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.dialog-head {
+  padding: 20px 22px 4px;
+}
+
+.dialog-head h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.dialog-head p {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.meter {
+  margin: 16px 22px 4px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #7fd1a3, var(--glow) 45%, var(--danger));
+}
+
+.meter-legend {
+  display: grid;
+  grid-template-columns: 40% 1fr auto;
+  margin: 0 22px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.meter-legend span:nth-child(2) {
+  translate: -50% 0;
+}
+
+.tips-title {
+  margin: 16px 22px 6px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tips {
+  margin: 0 22px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.tips li {
+  position: relative;
+  padding-left: 16px;
+  color: var(--text-2);
+}
+
+.tips li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--glow);
+}
+
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 18px 22px 20px;
+}
+
+.toasts {
+  position: fixed;
+  right: calc(var(--inspector) + 24px);
+  bottom: 64px;
+  z-index: 10;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  padding: 12px 10px 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+  animation: toast-in 0.18s ease-out;
+}
+
+.toast b {
+  display: block;
+  font-weight: 600;
+}
+
+.toast span {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.toast-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  font-weight: 700;
+  background: rgb(127 209 163 / 0.14);
+  color: #7fd1a3;
+}
+
+.toast.error .toast-icon {
+  background: rgb(240 122 90 / 0.14);
+  color: var(--danger);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; translate: 0 8px; }
+}
+
 /* Narrow screens: preview on top, controls below, and the page scrolls as a whole. */
 @media (max-width: 800px) {
   html,
@@ -919,6 +1228,11 @@ footer .hint {
     flex-basis: 100%;
     order: 1;
     white-space: normal;
+  }
+  .toasts {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
   }
 }
 

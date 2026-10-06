@@ -43,19 +43,22 @@ export interface Settings {
 export type Key = keyof Settings;
 export type Ctl = (
   | { type: 'range' | 'number'; key: Key; label: string; min: number; max: number; step: number; unit?: string; hint?: string }
-  | { type: 'select'; key: Key; label: string; options: [string, string][]; numeric?: boolean; hint?: string }
+  | { type: 'select' | 'seg'; key: Key; label: string; options: [string, string][]; numeric?: boolean; hint?: string }
   | { type: 'checkbox' | 'color'; key: Key; label: string; hint?: string }
-) & { modes?: Mode[] };
+) & { modes?: Mode[]; advanced?: boolean };
 
 /** Panels built by a mode's own code and appended to a section. */
 export type ExtraPanel = 'lithoFilaments' | 'stack' | 'loadout' | 'filaments';
 
+/** One workflow step of the inspector. */
 export interface Section {
   title: string;
   open?: boolean;
   modes?: Mode[];
   controls: Ctl[];
   extra?: ExtraPanel;
+  /** One-line summary shown in the step header. */
+  summary?: (s: Settings) => string;
   /** Adds a button that resets this section's controls to their defaults. */
   resetLabel?: string;
 }
@@ -140,104 +143,105 @@ export const LITHO_PRESETS: Record<string, Filament[]> = {
 
 export const DEFAULT_LITHO_PRESET = 'CMY + White';
 
+const ASPECTS: [string, string][] = [
+  ['original', 'Photo'],
+  ['1', '1:1'],
+  ['1.3333', '4:3'],
+  ['0.75', '3:4'],
+  ['1.5', '3:2'],
+  ['0.6667', '2:3'],
+  ['1.7778', '16:9'],
+  ['0.5625', '9:16'],
+  ['1.4', '7:5'],
+  ['0.7143', '5:7'],
+];
+const aspectLabel = (v: string) => ASPECTS.find(([k]) => k === v)?.[1] ?? v;
+
+/** The inspector, in workflow order: framing, filaments, look, print. Steps are numbered per mode. */
 export const SECTIONS: Section[] = [
   {
-    title: 'Framing',
+    title: 'Photo & framing',
     open: true,
+    summary: (s) => `${s.widthMm} mm · ${aspectLabel(s.aspect)}${s.borderMm ? ` · ${s.borderMm} mm frame` : ''}`,
     controls: [
       { type: 'number', key: 'widthMm', label: 'Width', min: 20, max: 300, step: 1, unit: 'mm' },
-      {
-        type: 'select',
-        key: 'aspect',
-        label: 'Aspect',
-        options: [
-          ['original', 'Photo'],
-          ['1', '1:1'],
-          ['1.3333', '4:3'],
-          ['0.75', '3:4'],
-          ['1.5', '3:2'],
-          ['0.6667', '2:3'],
-          ['1.7778', '16:9'],
-          ['0.5625', '9:16'],
-          ['1.4', '7:5'],
-          ['0.7143', '5:7'],
-        ],
-      },
-      { type: 'select', key: 'rotation', label: 'Rotate', numeric: true, options: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']] },
+      { type: 'select', key: 'aspect', label: 'Aspect', options: ASPECTS },
+      { type: 'seg', key: 'rotation', label: 'Rotate', numeric: true, options: [['0', '0°'], ['90', '90°'], ['180', '180°'], ['270', '270°']] },
       { type: 'checkbox', key: 'flip', label: 'Mirror' },
-      { type: 'range', key: 'zoom', label: 'Zoom', min: 1, max: 6, step: 0.01, unit: '×', hint: 'Scroll on the preview' },
-      { type: 'range', key: 'panX', label: 'Pan X', min: -1, max: 1, step: 0.01, hint: 'Drag the preview' },
-      { type: 'range', key: 'panY', label: 'Pan Y', min: -1, max: 1, step: 0.01 },
       { type: 'number', key: 'borderMm', label: 'Frame width', min: 0, max: 30, step: 0.5, unit: 'mm' },
       { type: 'number', key: 'frameThickness', label: 'Frame height', min: 0.2, max: 12, step: 0.1, unit: 'mm' },
+      { type: 'range', key: 'zoom', label: 'Zoom', min: 1, max: 6, step: 0.01, unit: '×', hint: 'Or scroll on the preview', advanced: true },
+      { type: 'range', key: 'panX', label: 'Pan X', min: -1, max: 1, step: 0.01, hint: 'Or drag the preview', advanced: true },
+      { type: 'range', key: 'panY', label: 'Pan Y', min: -1, max: 1, step: 0.01, hint: 'Or drag the preview', advanced: true },
     ],
   },
   {
-    title: 'Image',
-    resetLabel: 'Reset image',
-    controls: [
-      { type: 'range', key: 'brightness', label: 'Brightness', min: -0.5, max: 0.5, step: 0.01 },
-      { type: 'range', key: 'contrast', label: 'Contrast', min: -0.9, max: 0.9, step: 0.01 },
-      { type: 'range', key: 'gamma', label: 'Gamma', min: 0.3, max: 3, step: 0.01 },
-      { type: 'range', key: 'saturation', label: 'Saturation', min: 0, max: 2.5, step: 0.01, modes: ['litho'] },
-    ],
-  },
-  {
-    title: 'Depth & resolution',
-    open: true,
-    controls: [
-      { type: 'number', key: 'minThickness', label: 'Min body', min: 0.2, max: 5, step: 0.05, unit: 'mm', hint: 'Body thickness for highlights', modes: ['litho'] },
-      { type: 'number', key: 'maxThickness', label: 'Max body', min: 0.6, max: 10, step: 0.1, unit: 'mm', hint: 'Body thickness for shadows', modes: ['litho'] },
-      { type: 'range', key: 'baseLayers', label: 'Min height', min: 1, max: 40, step: 1, hint: 'Height of the lowest pixels, in layers (the ground plate)', modes: ['paint', 'mosaic'] },
-      {
-        type: 'select',
-        key: 'heightMode',
-        label: 'Heights',
-        options: [
-          ['match', 'Best color match'],
-          ['luminance', 'From brightness'],
-        ],
-        hint: 'Best color match: each pixel gets the height whose printed color is closest to it. From brightness: brighter pixels print taller (a plain heightmap)',
-        modes: ['paint'],
-      },
-      { type: 'checkbox', key: 'invert', label: 'Invert heights', hint: 'Brightness mode: make dark pixels tall instead of bright ones', modes: ['paint'] },
-      { type: 'number', key: 'layerHeight', label: 'Layer height', min: 0.04, max: 0.3, step: 0.02, unit: 'mm' },
-      { type: 'range', key: 'pixelMm', label: 'Pixel size', min: 0.1, max: 1, step: 0.05, unit: 'mm', hint: 'Relief resolution. Smaller = finer but heavier file' },
-      { type: 'range', key: 'meshTolerance', label: 'Simplify', min: 0, max: 0.1, step: 0.005, unit: 'mm', hint: 'Max relief error allowed when merging flat areas. Higher = smaller file', modes: ['litho'] },
-    ],
-  },
-  {
-    title: 'Color mixing',
+    title: 'Color & filaments',
     open: true,
     modes: ['litho'],
+    summary: (s) => (s.colorLayers ? `${s.colorLayers} color layers${s.dither ? ' · dithered' : ''}` : 'Monochrome'),
     controls: [
-      { type: 'range', key: 'colorLayers', label: 'Color layers', min: 0, max: 10, step: 1, hint: 'Layers of the front color slab' },
-      { type: 'range', key: 'colorPriority', label: 'Color priority', min: 0, max: 4, step: 0.05, hint: 'Hue accuracy vs. tone accuracy' },
-      { type: 'range', key: 'colorCellMm', label: 'Color cell', min: 0.3, max: 1.2, step: 0.05, unit: 'mm', hint: 'Size of each color dot. Keep it at least the nozzle width' },
+      { type: 'range', key: 'colorLayers', label: 'Color layers', min: 0, max: 10, step: 1, hint: 'Layers of the front color slab. 0 = classic single-color lithophane' },
       { type: 'checkbox', key: 'dither', label: 'Dithering', hint: 'Mix neighbouring color stacks to smooth gradients' },
+      { type: 'range', key: 'colorPriority', label: 'Color priority', min: 0, max: 4, step: 0.05, hint: 'Hue accuracy vs. tone accuracy', advanced: true },
+      { type: 'range', key: 'colorCellMm', label: 'Color cell', min: 0.3, max: 1.2, step: 0.05, unit: 'mm', hint: 'Size of each color dot. Keep it at least the nozzle width', advanced: true },
     ],
     extra: 'lithoFilaments',
   },
   { title: 'Layer stack', open: true, modes: ['paint'], controls: [], extra: 'stack' },
   {
-    title: 'Filament mosaic',
+    title: 'Loadout',
     open: true,
     modes: ['mosaic'],
+    summary: (s) => `${s.tintLayers} tint layers · ${s.surface}`,
     controls: [
       { type: 'range', key: 'tintLayers', label: 'Tint layers', min: 2, max: 16, step: 1, hint: 'Layers above the ground that tiles can use for tinting. More = more colors, slower to compute' },
-      { type: 'range', key: 'tileSegments', label: 'Segments', min: 1, max: 4, step: 1, hint: 'Filament segments per tile. 3 is a good default; 4 blends translucent filaments better' },
-      { type: 'select', key: 'surface', label: 'Surface', options: [['stepped', 'Stepped'], ['level', 'Level']], hint: 'Stepped: each tile only as tall as its combo. Level: pad tiles with ground filament to one even top' },
-      { type: 'range', key: 'minIsland', label: 'Min island', min: 0, max: 12, step: 1, hint: 'Same-combo islands smaller than this many tiles merge into a neighbour (tiny dots print badly)' },
-      { type: 'checkbox', key: 'mosaicDither', label: 'Dithering', hint: 'Mix neighbouring tiles to smooth gradients. Creates many single-tile dots' },
+      { type: 'seg', key: 'surface', label: 'Surface', options: [['stepped', 'Stepped'], ['level', 'Level']], hint: 'Stepped: each tile only as tall as its combo. Level: pad tiles with ground filament to one even top' },
+      { type: 'range', key: 'tileSegments', label: 'Segments', min: 1, max: 4, step: 1, hint: 'Filament segments per tile. 3 is a good default; 4 blends translucent filaments better', advanced: true },
+      { type: 'range', key: 'minIsland', label: 'Min island', min: 0, max: 12, step: 1, hint: 'Same-combo islands smaller than this many tiles merge into a neighbour (tiny dots print badly)', advanced: true },
+      { type: 'checkbox', key: 'mosaicDither', label: 'Dithering', hint: 'Mix neighbouring tiles to smooth gradients. Creates many single-tile dots', advanced: true },
     ],
     extra: 'loadout',
   },
-  { title: 'Filaments', open: true, modes: ['paint', 'mosaic'], controls: [], extra: 'filaments' },
+  // Shared by painting and mosaic, so it is one section (its panel can only be mounted once).
+  { title: 'Your filaments', open: true, modes: ['paint', 'mosaic'], controls: [], extra: 'filaments' },
   {
-    title: 'Preview light',
+    title: 'Look',
+    open: true,
+    resetLabel: 'Reset look',
+    summary: (s) => (s.mode === 'paint' ? (s.heightMode === 'match' ? 'Color match' : 'From brightness') : s.brightness || s.contrast || s.gamma !== 1 ? 'Adjusted' : 'Original'),
     controls: [
-      { type: 'color', key: 'lightColor', label: 'Light' },
-      { type: 'range', key: 'exposure', label: 'Intensity', min: 0.3, max: 3, step: 0.01 },
+      {
+        type: 'seg',
+        key: 'heightMode',
+        label: 'Heights',
+        options: [
+          ['match', 'Color match'],
+          ['luminance', 'Brightness'],
+        ],
+        hint: 'Color match: each pixel gets the height whose printed color is closest to it. Brightness: brighter pixels print taller (a plain heightmap)',
+        modes: ['paint'],
+      },
+      { type: 'checkbox', key: 'invert', label: 'Invert heights', hint: 'Brightness mode: make dark pixels tall instead of bright ones', modes: ['paint'] },
+      { type: 'range', key: 'brightness', label: 'Brightness', min: -0.5, max: 0.5, step: 0.01 },
+      { type: 'range', key: 'contrast', label: 'Contrast', min: -0.9, max: 0.9, step: 0.01 },
+      { type: 'range', key: 'gamma', label: 'Gamma', min: 0.3, max: 3, step: 0.01 },
+      { type: 'range', key: 'saturation', label: 'Saturation', min: 0, max: 2.5, step: 0.01, modes: ['litho'] },
+      { type: 'color', key: 'lightColor', label: 'Preview light', advanced: true },
+      { type: 'range', key: 'exposure', label: 'Intensity', min: 0.3, max: 3, step: 0.01, advanced: true },
+    ],
+  },
+  {
+    title: 'Print',
+    open: true,
+    summary: (s) => `${s.layerHeight.toFixed(2)} mm layers · ${s.pixelMm.toFixed(2)} mm pixels`,
+    controls: [
+      { type: 'number', key: 'layerHeight', label: 'Layer height', min: 0.04, max: 0.3, step: 0.02, unit: 'mm' },
+      { type: 'range', key: 'pixelMm', label: 'Pixel size', min: 0.1, max: 1, step: 0.05, unit: 'mm', hint: 'Relief resolution. Smaller = finer but heavier file' },
+      { type: 'number', key: 'minThickness', label: 'Min body', min: 0.2, max: 5, step: 0.05, unit: 'mm', hint: 'Body thickness for highlights', modes: ['litho'] },
+      { type: 'number', key: 'maxThickness', label: 'Max body', min: 0.6, max: 10, step: 0.1, unit: 'mm', hint: 'Body thickness for shadows', modes: ['litho'] },
+      { type: 'range', key: 'baseLayers', label: 'Min height', min: 1, max: 40, step: 1, hint: 'Height of the lowest pixels, in layers (the ground plate)', modes: ['paint', 'mosaic'] },
+      { type: 'range', key: 'meshTolerance', label: 'Simplify', min: 0, max: 0.1, step: 0.005, unit: 'mm', hint: 'Max relief error allowed when merging flat areas. Higher = smaller file', modes: ['litho'], advanced: true },
     ],
   },
 ];

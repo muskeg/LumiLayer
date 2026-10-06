@@ -215,7 +215,7 @@ export class MosaicController {
     };
     const worker = new Worker(new URL('./threeMfWorker.ts', import.meta.url), { type: 'module' });
     try {
-      const file = await runExport(worker, input, [voxels.buffer], 'increase Pixel size, raise Min island or turn off Dithering', this.onStatus);
+      const file = await runExport(worker, input, [voxels.buffer], ['Increase Pixel size', 'Raise Min island (Loadout › Advanced)', 'Turn off Dithering'], this.onStatus);
       if (file) triggerDownload(new Blob([file.bytes], { type: 'model/3mf' }), exportFileName(title, kind));
       return file;
     } finally {

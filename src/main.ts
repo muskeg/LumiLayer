@@ -9,7 +9,8 @@ import { adjust, demoImage, loadImage, panRange, renderFramed, sourceAspect, typ
 import { buildLithoFilaments } from './lithoFilaments';
 import { buildSolver, colorSlabThickness, solve, type LithoParams, type LithoResult, type Solver } from './lithophane';
 import { PaintController } from './paint/controller';
-import { runExport, type ExportedFile } from './paint/exportClient';
+import { runExport, setHeavyExportPrompt, type ExportedFile } from './paint/exportClient';
+import { askHeavyExport, toast } from './feedback';
 import { MosaicController } from './paint/mosaicController';
 import type { Preview3D, Preview3DInput } from './preview3d';
 import { DEFAULT_LITHO_PRESET, DEFAULTS, frameGrid, LITHO_PRESETS, MODE_DEFAULTS, VIEW_LABELS, type Settings } from './settings';
@@ -85,6 +86,7 @@ function showView() {
   if (isPaint) paint!.setOpticalMode(view === 'alt' ? 'backlit' : 'frontlit');
   if (is3d) update3d();
   else draw2d();
+  updateRulers();
 }
 
 let pending = false;
@@ -250,6 +252,7 @@ function setInfo(headline: string, details: string, hint: string) {
 }
 
 function updateInfo() {
+  updateRulers();
   const px = lastPx;
   const lh = settings.layerHeight;
   if (settings.mode === 'mosaic') {
@@ -282,6 +285,24 @@ function updateInfo() {
       (slab > 0 ? ` · color slab ${settings.colorLayers} × ${lh.toFixed(2)} mm, cells ${(colorCellPx(px) * px).toFixed(2)} mm` : ''),
     `Print face-down (the viewing side is on the bed). Use ${lh.toFixed(2)} mm for both first layer and layer height, 100% infill.`,
   );
+}
+
+/** Width and height of the print in mm, drawn along its edges (same contain-fit as the canvases). */
+function updateRulers() {
+  const stage = $('#stage');
+  const rx = $('#ruler-x'), ry = $('#ruler-y');
+  const show = view !== '3d' && gridSize.cols > 1;
+  rx.hidden = ry.hidden = !show;
+  if (!show) return;
+  const pad = parseFloat(getComputedStyle(stage).paddingLeft) || 0;
+  const cw = stage.clientWidth - 2 * pad, ch = stage.clientHeight - 2 * pad;
+  const aspect = gridSize.cols / gridSize.rows;
+  const w = Math.min(cw, ch * aspect), h = w / aspect;
+  const x0 = pad + (cw - w) / 2, y0 = pad + (ch - h) / 2;
+  Object.assign(rx.style, { left: `${x0}px`, top: `${y0 + h + 6}px`, width: `${w}px` });
+  Object.assign(ry.style, { left: `${x0 + w + 6}px`, top: `${y0}px`, height: `${h}px` });
+  rx.firstElementChild!.textContent = `${(gridSize.cols * lastPx).toFixed(1)} mm`;
+  ry.firstElementChild!.textContent = `${(gridSize.rows * lastPx).toFixed(1)} mm`;
 }
 
 function setStatus(s: string) {
@@ -370,7 +391,7 @@ async function exportLitho(): Promise<ExportedFile | null> {
     lithoWorker,
     { kind: 'litho', result: geometry, tolerance: settings.meshTolerance },
     [],
-    'raise Color cell, raise Simplify, increase Pixel size or turn off Dithering',
+    ['Raise Color cell', 'Raise Simplify (Print › Advanced)', 'Increase Pixel size', 'Turn off Dithering'],
     setStatus,
   );
   if (file) triggerDownload(new Blob([file.bytes], { type: 'model/3mf' }), exportFileName(sourceName, 'lithophane'));
@@ -378,19 +399,27 @@ async function exportLitho(): Promise<ExportedFile | null> {
 }
 
 function setupExport() {
+  setHeavyExportPrompt(askHeavyExport);
   const btn = $<HTMLButtonElement>('#export');
   btn.onclick = async () => {
     btn.disabled = true;
+    $('#stage').classList.add('busy');
     try {
       setStatus('Building 3MF in the background…');
       const m = settings.mode;
       const r = await (m === 'litho' ? exportLitho() : m === 'mosaic' ? mosaic.exportModel(sourceName) : paint!.exportModel(sourceName));
-      setStatus(r ? `Exported ${r.parts} parts · ${(r.triangles / 1e6).toFixed(2)} M triangles · ${(r.bytes.byteLength / 1e6).toFixed(1)} MB` : 'Export cancelled');
+      if (r) {
+        const summary = `${r.parts} parts · ${(r.triangles / 1e6).toFixed(2)} M triangles · ${(r.bytes.byteLength / 1e6).toFixed(1)} MB`;
+        setStatus(`Exported ${summary}`);
+        toast('3MF exported', summary);
+      } else setStatus('Export cancelled');
     } catch (e) {
       console.error(e);
       setStatus(`Export failed: ${(e as Error).message}`);
+      toast('Export failed', (e as Error).message, 'error');
     } finally {
       btn.disabled = false;
+      $('#stage').classList.remove('busy');
     }
   };
 }
@@ -410,6 +439,7 @@ panel = buildControlPanel(
   },
 );
 refreshRangeFills = watchRangeFills($('#controls'));
+new ResizeObserver(updateRulers).observe($('#stage'));
 syncControls();
 applyModeUi();
 setupViewer();
