@@ -86,7 +86,7 @@ Three nearly-identical "a filament has a name, color, and td" shapes exist:
 | --- | --- | --- | --- |
 | `Filament` | `color.ts` | `name`, `color`, `td`, `enabled` | litho presets & solver (in memory, not persisted) |
 | `FilamentProfile` | `paint/model.ts` | `id`, `name`, `color`, `td` | persisted paint/mosaic profiles |
-| `MosaicFilament` | `paint/mosaic.ts` | `name`, `color`, `td` | mosaic combo solve — a structural subset of `FilamentProfile` |
+| `MosaicFilament` | `paint/mosaic.ts` | `name`, `color`, `td` | mosaic combo solve — `Pick<FilamentProfile, 'name' \| 'color' \| 'td'>` since rev. 3 |
 
 (corrected) Unifying them is a tidy-up, not a correctness fix. A `tdConvention` field (the
 first pass's idea) would be the wrong model: TD is a property of the filament, the convention

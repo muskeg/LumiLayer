@@ -1,5 +1,6 @@
 import { linearToOklab, linearToSrgb } from '../color';
 import { filamentOptics, stackOn, type FilamentOptics } from './km';
+import type { FilamentProfile } from './model';
 import { CHROMA_WEIGHT, targetLab } from './optics';
 
 /**
@@ -8,11 +9,7 @@ import { CHROMA_WEIGHT, targetLab } from './optics';
  * single curve a global layer→filament stack gives.
  */
 
-export interface MosaicFilament {
-  name: string;
-  color: string;
-  td: number;
-}
+export type MosaicFilament = Pick<FilamentProfile, 'name' | 'color' | 'td'>;
 
 export interface ComboConfig {
   layerHeight: number;

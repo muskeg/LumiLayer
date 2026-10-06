@@ -216,7 +216,7 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
   `framing.ts`, and the litho filament editor in `lithoFilaments.ts`.
 - The litho path and the paint/mosaic paths each define their own `Filament`-like type
   (`Filament` in `color.ts` vs `FilamentProfile` in `paint/model.ts` vs `MosaicFilament` in
-  `paint/mosaic.ts`). `MosaicFilament` is already a structural subset of `FilamentProfile`, so
+  `paint/mosaic.ts`). `MosaicFilament` is an alias of a `FilamentProfile` subset (rev. 3), so
   the real split is litho (in-memory presets, not persisted) vs paint/mosaic (persisted
   profiles).
 - TD is read by different models: litho and the painting Backlit view (10% light left at 1 TD),

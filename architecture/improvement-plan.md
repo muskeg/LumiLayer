@@ -26,17 +26,10 @@ so the gate never prevented the freeze (see B13). The two-step protocol is what 
 
 ---
 
-### I2 — Consolidate the three filament types into one 🟡 (corrected: was 🔴)
-`Filament` (color.ts), `FilamentProfile` (paint/model.ts), and `MosaicFilament`
-(paint/mosaic.ts) are near-identical `{name, color, td}` shapes. `MosaicFilament` is already a
-structural subset of `FilamentProfile`. This is a tidy-up, not the root of B2/B5/B6:
-B2 is unreachable, B6 is fixed, and B5 is a model question.
-
-**What to do (if at all):** alias `MosaicFilament` to `Pick<FilamentProfile, 'name' | 'color' | 'td'>`.
-Do **not** add a `tdConvention` field: TD is a filament property; the convention belongs to
-each model (see B5).
-
-**Effort:** S.
+### I2 — Consolidate the three filament types into one ✅ done (rev. 3, corrected scope)
+`MosaicFilament` is now `Pick<FilamentProfile, 'name' | 'color' | 'td'>`. `Filament` (litho)
+stays separate on purpose: it carries `enabled`, lives only in memory, and has no `id`. No
+`tdConvention` field: TD is a filament property; the convention belongs to each model (see B5).
 
 ---
 
@@ -131,8 +124,9 @@ tinting. The panel also says the profiles are shared by both modes. The litho le
 | I6 | 🟠 | Add missing tests (worker protocol, framing, determinism, mesh size guard) | ✅ done |
 | I4 | 🟠 | Split `main.ts` | ✅ done |
 | I5 | 🟠 | Break `mosaicController → controller` coupling | ✅ done |
-| I2 | 🟡 | Alias `MosaicFilament` (no `tdConvention`) | open |
+| I2 | 🟡 | Alias `MosaicFilament` (no `tdConvention`) | ✅ done |
 | I7 | 🟡 | Unify `luma`/`luminance` (fix B3/B4) | ✅ done |
 | I10 | 🟡 | TD-meaning tooltips | ✅ done |
 
-**Suggested order:** only I2 (a small type alias) is left.
+**Status:** every item in this plan is done. Remaining work lives in the bug plan (B5, B2)
+and the vulnerability plan (V4, V6, optional V1 hard cap).

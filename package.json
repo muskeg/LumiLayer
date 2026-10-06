@@ -10,8 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "fflate": "^0.8.3",
-    "three": "^0.186.1"
+    "fflate": "0.8.3",
+    "three": "0.186.1"
   },
   "devDependencies": {
     "@types/three": "^0.186.0",

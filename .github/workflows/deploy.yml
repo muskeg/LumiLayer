@@ -24,6 +24,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Shipped code must have no known high/critical advisories; dev tooling is reported only.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
+        continue-on-error: true
       - run: npm test
       - run: npm run build
       - uses: actions/configure-pages@v5
