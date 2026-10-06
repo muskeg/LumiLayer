@@ -5,7 +5,7 @@ import {
   buildCombos, mosaicStats, mosaicVoxels, KdTree, loadoutOptics, combosFromList, renderMosaic, solveMosaic,
   type MosaicFilament, type MosaicResult, type ComboConfig, type ComboSet,
 } from './mosaic';
-import { AMS_SLOTS, el, isLight } from './controller';
+import { AMS_SLOTS, el, isLight } from './ui';
 import type { MosaicExportInput } from './export';
 import { restoreLoadout, normalizeLoadout, storeLoadout, type FilamentProfile } from './model';
 import { pickLoadout } from './loadout';

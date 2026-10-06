@@ -19,7 +19,8 @@ import { gamutError, pickLoadout } from './paint/loadout';
 import { sampleImage } from './paint/suggest';
 import { hexLuma, hexToRgb, linearToOklab, luma, luminance, srgbToLinear, TD_FLOOR } from './color';
 import { adjust, panRange, sourceAspect, type Source } from './imaging';
-import { isLight } from './paint/controller';
+import { isLight } from './paint/ui';
+import { frameGrid, MAX_PIXELS } from './settings';
 
 const params = (over: Partial<LithoParams> = {}): LithoParams => ({
   pixelMm: 0.5,
@@ -365,6 +366,13 @@ describe('framing', () => {
     expect(panRange(src, 100, 100, { ...f, rotation: 90 })).toEqual({ x: 0, y: 50 });
     expect(panRange(src, 100, 100, { ...f, zoom: 2 })).toEqual({ x: 150, y: 50 });
     expect(panRange(src, 200, 100, f)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('sizes the grid from the settings and caps it at MAX_PIXELS', () => {
+    expect(frameGrid({ widthMm: 100, borderMm: 3, pixelMm: 0.2 }, 2)).toEqual({ px: 0.2, cols: 500, rows: 250, border: 15 });
+    const big = frameGrid({ widthMm: 300, borderMm: 0, pixelMm: 0.1 }, 1);
+    expect(big.px).toBeGreaterThan(0.1);
+    expect(big.cols * big.rows).toBeLessThanOrEqual(MAX_PIXELS * 1.01);
   });
 });
 

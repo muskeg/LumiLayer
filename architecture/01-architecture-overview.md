@@ -208,10 +208,12 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
 
 ## 6. Coupling & layering observations
 
-- `paint/controller.ts` exports `el`, `isLight`, and `AMS_SLOTS` that `mosaicController.ts`
-  imports — a mild cross-controller coupling. Acceptable, but it's a seam worth keeping small.
-- `main.ts` is a large orchestrator (~800 lines) that knows the details of all three modes.
-  It is the main place where a "settings object grows unboundedly" smell will bite over time.
+- `el`, `isLight` and `AMS_SLOTS` live in `paint/ui.ts` (rev. 3), so the two mode controllers
+  no longer import each other.
+- `main.ts` (~400 lines since rev. 3) is the orchestrator: state, mode dispatch, `compute`,
+  previews, info bar, file input and export wiring. The settings table and defaults are in
+  `settings.ts` (pure, with `frameGrid`), the panel builder in `controls.ts`, drag/zoom in
+  `framing.ts`, and the litho filament editor in `lithoFilaments.ts`.
 - The litho path and the paint/mosaic paths each define their own `Filament`-like type
   (`Filament` in `color.ts` vs `FilamentProfile` in `paint/model.ts` vs `MosaicFilament` in
   `paint/mosaic.ts`). `MosaicFilament` is already a structural subset of `FilamentProfile`, so
@@ -229,13 +231,13 @@ hiding it. This is what lets 4 filaments reach hundreds of distinct colors.
 
 ## 7. Testing posture
 
-Two test files, 42 tests. `core.test.ts` covers the riskiest math and geometry: solver
+Two test files, 43 tests. `core.test.ts` covers the riskiest math and geometry: solver
 tone mapping, combo budget, manifold closure and volume conservation across modes and
 filament sets, a flat-block triangle-count guard on the greedy mesher, band→material mapping,
 3MF package structure, **CPU vs shader height matching (a statement-for-statement port of
 `matchLayers`)**, KM convergence and TD contrast, combo enumeration/dedupe, k-d-tree
 correctness, island merging, swatch plate, loadout normalization, auto-pick quality and
-determinism, framing geometry (`panRange`/`sourceAspect`), and the brightness helpers.
+determinism, framing geometry (`panRange`/`sourceAspect`/`frameGrid`), and the brightness helpers.
 `exportWorker.test.ts` runs the real worker module in-process behind a fake `Worker` and
 covers the export protocol end to end: direct write, confirm → write, cancel, and the grid cap.
 Gaps: the canvas-based parts (`renderFramed`, 2D previews) and the GLSL itself (only its port

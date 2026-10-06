@@ -7,11 +7,16 @@ intentionally flat: **pure math modules** with no DOM, and a thin **UI layer** (
 ## 1. Dependency graph (top = depends on, bottom = depends on nothing)
 
 ```
-main.ts ──────────────► color(type), download, imaging, lithophane, preview3d, paint/controller, paint/mosaicController,
-                        paint/threeMfWorker (types + new Worker)
-paint/controller ────────────► download, paint/model, paint/preview, paint/optics, paint/suggest, paint/export(type), paint/threeMfWorker(type)
-paint/mosaicController ──────► color, download, paint/model, paint/mosaic, paint/swatches, paint/loadout, paint/export(type),
-                               paint/threeMfWorker(type), paint/controller (el/isLight/AMS_SLOTS)
+main.ts ──────────────► settings, controls, framing, lithoFilaments, color(type), download, imaging, lithophane, preview3d,
+                        paint/controller, paint/mosaicController, paint/exportClient (+ new Worker)
+settings ─────────────────────► color(type)  [pure]
+controls / framing ───────────► settings
+lithoFilaments ───────────────► settings, color(type)
+paint/controller ────────────► color, download, paint/ui, paint/model, paint/preview, paint/optics, paint/suggest,
+                               paint/exportClient, paint/export(type)
+paint/mosaicController ──────► color, download, paint/ui, paint/model, paint/mosaic, paint/swatches, paint/loadout,
+                               paint/exportClient, paint/export(type)
+paint/ui ─────────────────────► color
 paint/threeMfWorker ─────────► paint/export, threemf(type)
 paint/export ─────────────────► mesh, threemf, lithophane(type), paint/model(type)
 paint/preview ────────────────► color, paint/optics, paint/model
@@ -62,10 +67,15 @@ The pure core (`color`, `mesh`, `threemf`, `imaging`, `paint/{model,km,optics,mo
 | `paint/export.ts` | part builders for all three modes + `packParts` | `buildLithoParts`, `buildPaintingParts`, `buildMosaicParts`, `buildPainting3mf`, `packParts`, `countTriangles`, `MAX_EXPORT_CELLS` (worker-side grid cap), message types. |
 | `paint/threeMfWorker.ts` | dedicated worker; builds every 3MF | paint (transferred heights), mosaic (transferred voxels), litho (copied geometry). Above `confirmAbove` triangles it replies `confirm` and waits for `{ kind: 'write' }`. Exports `ExportRequest`, `WorkerRequest`, `WorkerResponse`, `BuildResponse`. |
 | `paint/exportClient.ts` | main-thread side of the export protocol | `runExport` (send → optional `confirm()` → write), `HEAVY_TRIANGLES = 3 M`; used by `main.ts` and both controllers. |
-| `paint/controller.ts` | `PaintController`: profiles, bands, GPU preview, worker export, stack panel, suggest; exports `el`, `isLight`, `AMS_SLOTS = 4` | `heights()` reads GPU layer counts, CPU fallback via `optics.ts`. Reuses one worker. |
-| `paint/mosaicController.ts` | `MosaicController`: loadout, combo solve, CPU preview, swatch plate, worker export, auto-pick | imports `el`, `isLight`, `AMS_SLOTS` **from `controller.ts`** (🟠 coupling). Creates a new worker per export. |
+| `paint/controller.ts` | `PaintController`: profiles, bands, GPU preview, worker export, stack panel, suggest, mode-specific TD help | `heights()` reads GPU layer counts, CPU fallback via `optics.ts`. Reuses one worker. |
+| `paint/mosaicController.ts` | `MosaicController`: loadout, combo solve, CPU preview, swatch plate, worker export, auto-pick | Creates a new worker per export. |
+| `paint/ui.ts` | DOM helpers shared by both controllers | `el`, `isLight`, `AMS_SLOTS = 4`. |
 | `preview3d.ts` | isolated three.js `Preview3D`, lazily imported | decoupled from export; own rAF loop. |
-| `main.ts` | settings, mode dispatch, UI shell, `compute`, `exportLitho`, `exportPainting`, framing | the orchestrator; owns a lazily created litho export worker. |
+| `main.ts` | state, mode dispatch, `compute`, 2D/3D previews, info bar, file input, export wiring | the orchestrator (~400 lines); owns a lazily created litho export worker. |
+| `settings.ts` | `Settings`, `DEFAULTS`, `MODE_DEFAULTS`, `VIEW_LABELS`, `LITHO_PRESETS`, the `SECTIONS` control table, `MAX_PIXELS`, `frameGrid` | pure (no DOM); `frameGrid` is tested. Sections name their mode panels by id (`extra: 'stack'`, …). |
+| `controls.ts` | builds the settings panel from `SECTIONS` | `buildControlPanel` → `{ sync, showMode }`. |
+| `framing.ts` | drag-to-pan, wheel-to-zoom on the previews | `attachFraming`. |
+| `lithoFilaments.ts` | litho preset + 4-slot filament editor | `buildLithoFilaments(onChange)`. |
 | `index.html` + `vite.config.ts` | app shell, control DOM; build config | the build injects a CSP `<meta>` (build only; dev needs HMR + inline styles). |
 
 ## 4. The Filament type triad (🟡 consolidation target)
@@ -84,21 +94,19 @@ belongs to each optical model.
 
 ## 5. Coupling hot-spots
 
-- **`mosaicController` → `controller`** for `el`, `isLight`, `AMS_SLOTS`. These are generic
-  utilities that live in a sibling controller by accident. Move them to a shared `paint/ui.ts`
-  (or `paint/dom.ts`) so the two controllers depend on a neutral module, not on each other.
-- **`main.ts`** owns ~800 lines: settings table, controls builder, mode dispatch, framing drag,
-  export. It is the largest file and the only non-pure file with real logic. The natural seams
-  are: a `settings.ts` (table + defaults), a `framing.ts` (drag/zoom), and the export functions.
+- ~~**`mosaicController` → `controller`**~~ Fixed in rev. 3: shared helpers moved to
+  `paint/ui.ts`.
+- ~~**`main.ts`** owns ~800 lines~~ Split in rev. 3 into `settings.ts`, `controls.ts`,
+  `framing.ts` and `lithoFilaments.ts`; `main.ts` is ~400 lines of wiring and the per-mode
+  `compute` / preview / info code.
 - **Two places implement the painting Beer–Lambert recurrence** (`preview.ts` shader +
   `optics.ts` `pathLabs`). Pinned since revision 2 by shared constants and a differential test.
-- **`main.ts` imports both controllers**, and each controller reaches back into `paint/model`
-  and (mosaic) `paint/controller`. The dependency arrows are mostly one-way and clean; the one
-  back-edge is `mosaicController → controller`.
+- **`main.ts` imports both controllers**; the controllers depend on shared modules
+  (`paint/model`, `paint/ui`, `paint/exportClient`) and no longer on each other.
 
 ## 6. Test coverage map
 
-`core.test.ts` (37 tests) and `exportWorker.test.ts` (5 tests) exercise the non-DOM code:
+`core.test.ts` (38 tests) and `exportWorker.test.ts` (5 tests) exercise the non-DOM code:
 
 - solver: enumeration, LUT, `bestCombo`, `targetFor`
 - mesh: manifold closure (edge-pairing + positive signed volume) for the three builders; a flat
@@ -110,7 +118,8 @@ belongs to each optical model.
 - mosaic: combo dedupe, `KdTree` nearest-neighbor vs brute force, island merge
 - model: `layersFromLuminance`, `normalizeStack`, `sanitizeProfile`, loadout auto-pick;
   suggestion and auto-pick are deterministic
-- imaging: `panRange` / `sourceAspect` cover geometry, `adjust` desaturation
+- imaging / settings: `panRange` / `sourceAspect` cover geometry, `frameGrid` (incl. the
+  `MAX_PIXELS` cap), `adjust` desaturation
 - color: `luma` vs `luminance` domains, `isLight` threshold
 - export protocol (`exportWorker.test.ts`): the real worker module behind a fake `Worker` —
   direct write, confirm → write, cancel (nothing left pending), grid cap error

@@ -175,7 +175,7 @@ This is a cross-cutting effort, not a single module change.
 | --- | --- | --- |
 | 1 | F1 measure-TD-from-swatches · F2 profile portability · F3 save/load project · F4 eyedropper | — |
 | 2 | F5 backlit-color · F6 multi-AMS · F7 stats estimator · F8 dither options | — |
-| 3 | F9 translucent mode · F10 A-B preview · F11 batch export · F12 i18n/a11y | I4 (I1, I9 done) |
+| 3 | F9 translucent mode · F10 A-B preview · F11 batch export · F12 i18n/a11y | — (I1, I4, I9 done) |
 
 **Suggested order:** F1 is the standout — it closes a loop the UI *already opens* with the
 swatch plate, and it directly improves print accuracy, which is the whole reason the app

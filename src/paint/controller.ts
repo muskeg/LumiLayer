@@ -1,4 +1,4 @@
-import { hexLuma, luma } from '../color';
+import { luma } from '../color';
 import { exportFileName, triggerDownload } from '../download';
 import type { PaintExportInput } from './export';
 import {
@@ -10,9 +10,7 @@ import { PaintPreview, type OpticalMode } from './preview';
 import { bandOptics, bestLayer, pathLabs, targetLab, type HeightMode } from './optics';
 import { runExport, type ExportedFile } from './exportClient';
 import { suggestStack } from './suggest';
-
-/** Filament slots of a single AMS unit. */
-export const AMS_SLOTS = 4;
+import { AMS_SLOTS, el, isLight } from './ui';
 
 /** What one TD means in each mode's optical model (the profiles, and so the values, are shared). */
 const TD_HELP = {
@@ -29,13 +27,6 @@ export interface PaintSettings {
   heightMode: HeightMode;
   light: string;
   exposure: number;
-}
-
-export function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  Object.assign(node, props);
-  node.append(...children);
-  return node;
 }
 
 /** Filament painting mode: profiles, layer stack, GPU preview and 3MF export. */
@@ -412,5 +403,3 @@ export class PaintController {
 function bandLabel(start: number, top: number, lh: number) {
   return `${(start * lh).toFixed(2)}–${(top * lh).toFixed(2)} mm`;
 }
-
-export const isLight = (hex: string) => hexLuma(hex) > 140 / 255;

@@ -49,35 +49,25 @@ disagreement) and B12 (TD floor mismatch).
 
 ## P1 — maintainability
 
-### I4 — Split `main.ts` (~800 lines, the only non-pure file with real logic) 🟠
-The file mixes: settings table + defaults, controls builder, mode dispatch, framing drag/zoom,
-export, and viewer. Natural seams, all mechanical:
+### I4 — Split `main.ts` ✅ done (rev. 3)
+`main.ts` went from ~810 to ~400 lines. New modules:
 
-- `settings.ts` — the `Settings` type, `DEFAULTS`, `MODE_DEFAULTS`, the control `Section` table.
-- `framing.ts` — the drag/zoom/pan handlers + `panRange`/`sourceAspect` usage.
-- `export.ts` — `exportLitho` / `exportPainting` (already half factored).
-- `main.ts` shrinks to wiring: DOM refs, mode switching, `compute()` dispatch.
+- `settings.ts` — `Settings`, `DEFAULTS`, `MODE_DEFAULTS`, `VIEW_LABELS`, `LITHO_PRESETS`, the
+  `SECTIONS` table (mode panels referenced by id, so the table is pure data), `MAX_PIXELS` and
+  `frameGrid` (the grid sizing that was inline in `compute`; now tested).
+- `controls.ts` — `buildControlPanel` returns `{ sync, showMode }`; the "Reset image" button is
+  driven by a `resetLabel` on the section instead of a title check.
+- `framing.ts` — `attachFraming` (drag-to-pan, wheel-to-zoom).
+- `lithoFilaments.ts` — the litho preset + slot editor.
 
-**Benefit:** each concern is independently testable (the framing and settings logic today has
-zero tests because they're entangled with the DOM).
-
-**Effort:** M (pure refactor, no behavior change — protect with the existing 42 tests + a couple
-of new settings/framing tests).
+Export wiring stayed in `main.ts`: after `runExport` it is ~20 lines. Verified: tests, build,
+and a browser pass over all three modes (sections per mode, preset change, wheel zoom, reset,
+exports), with no page errors.
 
 ---
 
-### I5 — Break `mosaicController → controller` coupling 🟠
-`mosaicController.ts` imports `el`, `isLight`, `AMS_SLOTS` from `controller.ts`. Those are
-generic utilities that live in a sibling controller by accident.
-
-**What to do:** move `el`, `isLight`, `AMS_SLOTS` (and any other shared DOM helpers) into a
-neutral `paint/ui.ts`. Both controllers then import from `paint/ui.ts`, removing the
-controller-to-controller edge.
-
-**Benefit:** the two controllers become independent peers over shared utilities instead of a
-hidden dependency; easier to test and to evolve separately.
-
-**Effort:** S.
+### I5 — Break `mosaicController → controller` coupling ✅ done (rev. 3)
+`el`, `isLight` and `AMS_SLOTS` moved to `paint/ui.ts`; both controllers import from there.
 
 ---
 
@@ -139,10 +129,10 @@ tinting. The panel also says the profiles are shared by both modes. The litho le
 | I8 | 🟡 | Audit 3MF streaming for large models | ✅ moot |
 | I11 | 🟠 | CSP in the production build | ✅ done |
 | I6 | 🟠 | Add missing tests (worker protocol, framing, determinism, mesh size guard) | ✅ done |
-| I4 | 🟠 | Split `main.ts` | open |
-| I5 | 🟠 | Break `mosaicController → controller` coupling | open |
+| I4 | 🟠 | Split `main.ts` | ✅ done |
+| I5 | 🟠 | Break `mosaicController → controller` coupling | ✅ done |
 | I2 | 🟡 | Alias `MosaicFilament` (no `tdConvention`) | open |
 | I7 | 🟡 | Unify `luma`/`luminance` (fix B3/B4) | ✅ done |
 | I10 | 🟡 | TD-meaning tooltips | ✅ done |
 
-**Suggested order:** I4 and I5 (now protected by the tests), then I2.
+**Suggested order:** only I2 (a small type alias) is left.
